@@ -13,14 +13,18 @@ import { PurchaseFlow } from "./purchase-flow";
 import { QuantityStepper } from "@/components/cart/quantity-stepper";
 import { addToCartAction } from "@/server/commerce/cart-actions";
 import { AutonomousFlow } from "./autonomous-flow";
+import { ClarifyPanel, ConversationTrail } from "./clarify-panel";
+// The same pure helper the agent uses server-side, so chips and free text are
+// folded into the message identically on both sides.
+import { applyAnswer, type SlotId } from "@/server/agents/customer/clarify";
 import { FeaturedGrid } from "./featured-grid";
 import type { FeaturedProduct } from "@/server/catalog/featured";
 
 const EXAMPLES = [
-  "Find me black running shoes, size 10, under ₹5,000",
-  "Noise cancelling headphones with long battery life",
+  "I want shoes",
+  "Formal shoes for a wedding, size 9",
+  "Football boots for firm ground",
   "The cheapest yoga mat I can return easily",
-  "Something to keep water hot on a trek, under ₹2,000",
 ];
 
 export function ShoppingAgent({
@@ -39,8 +43,22 @@ export function ShoppingAgent({
   const [turn, setTurn] = useState<TurnDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /**
+   * The conversation so far.
+   *
+   * `message` accumulates the shopper's answers as natural language, so every
+   * turn is re-parsed by the SAME intent parser — there is no second path that
+   * turns chips straight into filters and drifts from it.
+   */
+  const [message, setMessage] = useState("");
+  const [answered, setAnswered] = useState<string[]>([]);
+  const [trail, setTrail] = useState<{ question: string; answer: string }[]>([]);
 
-  const run = useCallback(async function run(message: string) {
+  const run = useCallback(async function run(
+    message: string,
+    answered: string[] = [],
+    skipQuestions = false,
+  ) {
     if (!message.trim()) return;
     setPending(true);
     setError(null);
@@ -48,7 +66,7 @@ export function ShoppingAgent({
       const response = await fetch("/api/agent/shop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, answered, skipQuestions }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -64,14 +82,42 @@ export function ShoppingAgent({
     }
   }, []);
 
+  /** A new search clears the previous conversation — answers must not leak across it. */
+  const startConversation = useCallback(
+    (text: string) => {
+      setMessage(text);
+      setAnswered([]);
+      setTrail([]);
+      void run(text, []);
+    },
+    [run],
+  );
+
+  const answerQuestion = useCallback(
+    (slotId: string, value: string) => {
+      const label = turn?.question?.question ?? "";
+      const next = applyAnswer(message, slotId as SlotId, value);
+      const nextAnswered = [...answered, slotId];
+      setMessage(next);
+      setAnswered(nextAnswered);
+      setTrail((t) => [...t, { question: label, answer: value }]);
+      void run(next, nextAnswered);
+    },
+    [answered, message, run, turn],
+  );
+
+  const skipAllQuestions = useCallback(() => {
+    void run(message, answered, true);
+  }, [answered, message, run]);
+
   // A search handed over from the sidebar runs once on arrival.
   const ranInitial = useRef(false);
   useEffect(() => {
     if (initialQuery && !ranInitial.current) {
       ranInitial.current = true;
-      void run(initialQuery);
+      startConversation(initialQuery);
     }
-  }, [initialQuery, run]);
+  }, [initialQuery, startConversation]);
 
   if (autonomous) {
     return <AutonomousFlow onExit={() => setAutonomous(false)} savedMethod={savedMethod} />;
@@ -98,7 +144,7 @@ export function ShoppingAgent({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              void run(query);
+              startConversation(query);
             }}
             className="flex gap-2"
           >
@@ -122,7 +168,7 @@ export function ShoppingAgent({
                 disabled={pending}
                 onClick={() => {
                   setQuery(example);
-                  void run(example);
+                  startConversation(example);
                 }}
                 className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
               >
@@ -142,7 +188,24 @@ export function ShoppingAgent({
 
       {error ? <Alert tone="danger" title="Request failed">{error}</Alert> : null}
       {pending ? <AgentProgress /> : null}
-      {turn && !pending ? <TurnView turn={turn} /> : null}
+      {turn && !pending && turn.outcome === "asking" ? (
+        <div className="space-y-3">
+          <ConversationTrail entries={trail} />
+          <ClarifyPanel
+            turn={turn}
+            pending={pending}
+            onAnswer={answerQuestion}
+            onSkipAll={skipAllQuestions}
+          />
+        </div>
+      ) : null}
+
+      {turn && !pending && turn.outcome !== "asking" ? (
+        <div className="space-y-3">
+          <ConversationTrail entries={trail} />
+          <TurnView turn={turn} />
+        </div>
+      ) : null}
 
       {!turn && !pending && !error ? (
         <FeaturedGrid

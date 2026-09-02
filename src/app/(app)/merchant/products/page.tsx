@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { Badge, Card, CardBody, EmptyState, LinkButton } from "@/components/ui";
+import { RecordCreated } from "@/components/ui/record-created";
 import { formatMoney } from "@/lib/money";
 import { requireMerchant } from "@/lib/session";
 import { getMerchantProducts } from "@/server/catalog/actions";
@@ -8,10 +9,10 @@ import { getMerchantProducts } from "@/server/catalog/actions";
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; created?: string }>;
 }) {
   const { merchant } = await requireMerchant();
-  const { q } = await searchParams;
+  const { q, created } = await searchParams;
   const all = await getMerchantProducts(merchant.id);
 
   // Sidebar search lands here; match on the fields a merchant would search by.
@@ -23,8 +24,21 @@ export default async function ProductsPage({
     : all;
   const unindexed = products.filter((p) => !p.indexed && p.status === "active").length;
 
+  // `created` is a product id set by the redirect after a successful write, so
+  // the tick can only appear for a row that actually exists.
+  const createdProduct = created ? all.find((p) => p.id === created) : undefined;
+
   return (
     <div className="space-y-5">
+      {createdProduct ? (
+        <RecordCreated
+          title="Product created"
+          detail={`${createdProduct.title} is live and indexed for AI discovery.`}
+          continueTo="/merchant/products"
+          continueLabel="Go to all products now"
+        />
+      ) : null}
+
       <PageHeader
         title="Products"
         description={

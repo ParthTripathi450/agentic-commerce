@@ -262,6 +262,25 @@
   animation: fade-up 0.28s ease-out both;
 }
 
+/* Confirmation tick: the ring sweeps, then the check draws itself. */
+@keyframes record-ring {
+  from {
+    stroke-dashoffset: 201;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes record-tick {
+  from {
+    stroke-dashoffset: 46;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

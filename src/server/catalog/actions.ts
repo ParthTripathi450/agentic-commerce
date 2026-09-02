@@ -267,7 +267,8 @@ export async function createProductAction(_prev: unknown, formData: FormData) {
   if (!result.ok) return { error: result.error };
 
   revalidatePath("/merchant/products");
-  redirect(`/merchant/products/${result.productId}`);
+  // Confirmation screen first, then the list — see components/ui/record-created.
+  redirect(`/merchant/products?created=${result.productId}`);
 }
 
 

@@ -124,7 +124,8 @@ export async function createAssistedProductAction(_prev: unknown, formData: Form
   if (!result.ok) return { error: result.error };
 
   revalidatePath("/merchant/products");
-  redirect(`/merchant/products/${result.productId}`);
+  // Confirmation screen first, then the list — see components/ui/record-created.
+  redirect(`/merchant/products?created=${result.productId}`);
 }
 
 const tagsSchema = z.object({

@@ -8,9 +8,15 @@ import { toTurnDto } from "@/server/agents/customer/dto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const SLOT_IDS = ["purpose", "size", "color", "budget", "width", "gender"] as const;
+
 const bodySchema = z.object({
   message: z.string().min(2, "Say what you are looking for").max(500),
   sessionId: z.string().max(36).optional(),
+  /** Slots already answered this conversation, so the agent does not repeat itself. */
+  answered: z.array(z.enum(SLOT_IDS)).max(8).default([]),
+  /** Set when the shopper asks to see results without further questions. */
+  skipQuestions: z.boolean().default(false),
 });
 
 export async function POST(request: Request) {
@@ -39,6 +45,8 @@ export async function POST(request: Request) {
       userId: session.user.id,
       message: parsed.data.message,
       sessionId: parsed.data.sessionId,
+      answered: parsed.data.answered,
+      skipQuestions: parsed.data.skipQuestions,
     });
     return NextResponse.json(toTurnDto(turn));
   } catch (cause) {
