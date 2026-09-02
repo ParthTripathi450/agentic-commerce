@@ -200,7 +200,13 @@ auth, parsing and redirects only. `deriveSearchTags()` gives the manual path det
 with **no LLM call**, so that form keeps working when the model is rate-limited.
 
 ### Conversational shopping (`server/agents/customer/conversation.ts`)
-The shop page is a **chat transcript**, not a search box. One LLM call per turn reads the WHOLE
+**Where it lives:** the big chat transcript is the **"Let the agent buy it for me"** flow
+(`autonomous-flow.tsx`), not `/shop`. Assisted shopping keeps its compact search box — the shopper
+who already knows what they want should not have to converse for it. The agent flow talks first
+because it acts on ONE instruction, so that instruction had better be right; the phrase it
+synthesises from the conversation is what the autonomous run then buys.
+
+One LLM call per turn reads the WHOLE
 conversation and returns: what it understood (slots, `null` for anything unstated), whether it can
 search honestly yet, and the next question **in its own words**. There is no keyword matching on
 replies — "something for pounding pavement at weekends" and "road running" land in the same place

@@ -9,25 +9,30 @@ import { intentFromUnderstanding, type ConversationUnderstanding } from "./conve
  * it silently removes products the shopper would have wanted.
  */
 
+type SlotOverrides = Partial<ConversationUnderstanding["slots"]>;
+
 const understanding = (
-  over: Partial<ConversationUnderstanding> = {},
-): ConversationUnderstanding => ({
-  slots: {
-    productType: null, purpose: null, size: null, color: null, brand: null,
-    width: null, gender: null, budgetMax: null, budgetMin: null, quantity: null,
-    ...(over.slots ?? {}),
-  },
-  understanding: "",
-  readyToSearch: true,
-  question: null,
-  questionAbout: null,
-  suggestions: [],
-  searchPhrase: "running shoes",
-  priority: "balanced",
-  degraded: false,
-  meta: {},
-  ...over,
-});
+  over: Partial<Omit<ConversationUnderstanding, "slots">> & { slots?: SlotOverrides } = {},
+): ConversationUnderstanding => {
+  const { slots: slotOverrides, ...rest } = over;
+  return {
+    slots: {
+      productType: null, purpose: null, size: null, color: null, brand: null,
+      width: null, gender: null, budgetMax: null, budgetMin: null, quantity: null,
+      ...slotOverrides,
+    },
+    understanding: "",
+    readyToSearch: true,
+    question: null,
+    questionAbout: null,
+    suggestions: [],
+    searchPhrase: "running shoes",
+    priority: "balanced",
+    degraded: false,
+    meta: {},
+    ...rest,
+  };
+};
 
 describe("intentFromUnderstanding", () => {
   it("leaves unstated slots null rather than inventing them", () => {

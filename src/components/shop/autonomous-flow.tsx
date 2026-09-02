@@ -1,9 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, ShieldCheck, X } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
+import { ChatPanel, type ChatMessage } from "./chat-panel";
+import type { TurnDto } from "@/server/agents/customer/dto";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { formatMoney } from "@/lib/money";
 import type { AutonomousOutcome } from "@/server/agents/customer/autonomous";
@@ -35,6 +37,8 @@ const STEPS = [
 
 const RAZORPAY_SRC = "https://checkout.razorpay.com/v1/checkout.js";
 
+type ChatTurn = { role: "shopper" | "agent"; content: string };
+
 export function AutonomousFlow({
   onExit,
   savedMethod,
@@ -43,8 +47,22 @@ export function AutonomousFlow({
   /** Description of the stored test method, or null to use the widget. */
   savedMethod: string | null;
 }) {
-  const [query, setQuery] = useState("");
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
+
+  /*
+   * The conversation that precedes the purchase.
+   *
+   * The agent buys on one instruction, so the instruction had better be right.
+   * It talks first — asking whatever it does not know — and only then commits
+   * to a choice. `history` is the transcript the model reads; `messages` is
+   * what the shopper sees.
+   */
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [history, setHistory] = useState<ChatTurn[]>([]);
+  const [answered, setAnswered] = useState<string[]>([]);
+  const [chips, setChips] = useState<{ label: string; value: string }[]>([]);
+  const [chatting, setChatting] = useState(false);
+  const [degraded, setDegraded] = useState(false);
 
   // Loaded up front: by the time the shopper clicks Allow, the widget must be
   // ready — fetching it then would stall the one moment that matters.
@@ -54,6 +72,87 @@ export function AutonomousFlow({
     script.src = RAZORPAY_SRC;
     script.async = true;
     document.body.appendChild(script);
+  }, []);
+
+  /**
+   * One conversational turn before the agent commits to anything.
+   *
+   * Reuses the assisted shopping endpoint purely to UNDERSTAND — it never buys.
+   * When the agent has heard enough, the phrase it synthesised from the whole
+   * conversation becomes the single instruction the autonomous run acts on, so
+   * what it buys is what was actually discussed.
+   */
+  const send = useCallback(
+    async function send(text: string, opts: { skipQuestions?: boolean } = {}) {
+      const trimmed = text.trim();
+      if (!trimmed && !opts.skipQuestions) return;
+
+      if (trimmed) setMessages((m) => m.concat({ role: "shopper", content: trimmed }));
+      setChips([]);
+      setChatting(true);
+
+      try {
+        const response = await fetch("/api/agent/shop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: trimmed,
+            answered,
+            history,
+            skipQuestions: opts.skipQuestions ?? false,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          setPhase({ name: "failed", reason: data.error ?? "The agent could not understand that." });
+          return;
+        }
+
+        const dto = data as TurnDto;
+        setDegraded(Boolean(dto.provenance?.degraded));
+        const nextHistory: ChatTurn[] = [...history, { role: "shopper", content: trimmed }];
+
+        if (dto.outcome === "asking" && dto.question) {
+          setMessages((m) =>
+            m.concat({
+              role: "agent",
+              content: dto.question!.question,
+              note: dto.question!.rationale || undefined,
+            }),
+          );
+          setChips(dto.question.options);
+          setAnswered((a) => [...a, dto.question!.id]);
+          setHistory([...nextHistory, { role: "agent", content: dto.question.question }]);
+          return;
+        }
+
+        // Understood enough — hand the synthesised instruction to the buyer.
+        setHistory(nextHistory);
+        const instruction =
+          dto.intent?.productQuery ||
+          nextHistory.filter((t) => t.role === "shopper").map((t) => t.content).join(", ");
+        setMessages((m) =>
+          m.concat({
+            role: "agent",
+            content: `Right — looking for ${instruction}. Let me find the best option and prepare the order.`,
+          }),
+        );
+        await run(instruction);
+      } catch {
+        setPhase({ name: "failed", reason: "Could not reach the agent." });
+      } finally {
+        setChatting(false);
+      }
+    },
+    [answered, history],
+  );
+
+  const resetConversation = useCallback(() => {
+    setMessages([]);
+    setHistory([]);
+    setAnswered([]);
+    setChips([]);
+    setPhase({ name: "idle" });
   }, []);
 
   async function run(message: string) {
@@ -193,30 +292,30 @@ export function AutonomousFlow({
             </p>
           </div>
 
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void run(query);
-            }}
-            className="flex gap-2"
-          >
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buy me black running shoes, size 10, under ₹5,000"
-              aria-label="What should the agent buy?"
-              disabled={phase.name === "running"}
-              className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-            />
-            <Button type="submit" disabled={phase.name === "running" || query.trim().length < 2}>
-              {phase.name === "running" ? "Working…" : "Let the agent buy"}
-            </Button>
-            <Button type="button" variant="ghost" onClick={onExit}>
+          <div className="flex justify-end">
+            <Button type="button" variant="ghost" size="sm" onClick={onExit}>
               Cancel
             </Button>
-          </form>
+          </div>
         </CardBody>
       </Card>
+
+      {phase.name === "idle" || chatting ? (
+        <ChatPanel
+          messages={messages}
+          chips={chips}
+          pending={chatting}
+          degraded={degraded}
+          placeholder={
+            messages.length === 0
+              ? "e.g. I want shoes for a half marathon"
+              : "Answer, or tell me anything else"
+          }
+          onSend={(text) => void send(text)}
+          onSkip={() => void send("just pick something suitable", { skipQuestions: true })}
+          onReset={resetConversation}
+        />
+      ) : null}
 
       {phase.name === "running" ? (
         <Card data-static="true">

@@ -142,8 +142,11 @@ total is now re-checked. Baskets that cannot be included are returned in `exclud
 Webhooks now settle every payment sharing a gateway order, not just the first.
 
 ### NLP conversation, replacing pattern matching (this session, after feedback)
-The shop page is now a **chat transcript** in a much larger container (34rem, 42rem on desktop):
-agent bubble left, shopper right, chips under the newest question, free text always live.
+The **"Let the agent buy it for me"** flow is now a chat transcript in a large container (34rem,
+42rem on desktop): agent bubble left, shopper right, chips under the newest question, free text
+always live. `/shop` assisted search keeps its original compact box — corrected after feedback;
+the big container belongs to the agent flow only. The agent converses until it understands, then
+the phrase it synthesised becomes the single instruction the autonomous purchase acts on.
 `server/agents/customer/conversation.ts` makes ONE LLM call per turn over the whole transcript and
 returns understood slots (null when unstated), whether it can search, and the next question in its
 own words. Verified: *"something for pounding the pavement on weekends, building up to a half
