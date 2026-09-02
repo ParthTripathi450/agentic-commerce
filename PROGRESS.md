@@ -3,13 +3,13 @@
 Read `NOTES.md` first for architecture and conventions. This file is the state snapshot.
 
 **Last updated:** 2026-09-02
-**Health:** 153 tests passing (20 files) · 0 lint issues · production build clean ·
-34 route files · 31 tables
+**Health:** 175 tests passing (22 files) · 0 lint issues · production build clean ·
+38 route files · 32 tables
 **Git:** pushed to `origin/main`
 **Repo:** https://github.com/ParthTripathi450/agentic-commerce-platform (private)
 
-**Local data:** 13 merchants · 68 active products · 340 variants · 27 categories · 910 orders ·
-24 users · 68/68 indexed · **68/68 have images**
+**Local data:** 18 merchants · 142 active products · 938 variants · 38 categories ·
+24 users · 142/142 indexed · **86 footwear products across 12 shoe categories**
 
 ---
 
@@ -69,7 +69,7 @@ Read `NOTES.md` first for architecture and conventions. This file is the state s
 | 4 | ~~Refunds not implemented~~ **CLOSED, verified live** | Merchant-issued refunds at `/merchant/orders`, plus `refund.processed` webhook handling. Exercised against the real Razorpay test API through `RazorpayGateway.refundPayment()`: `rfnd_TX7KZh0dBNJR1z` returned ₹5,072.82 on `pay_TX2SoFHFrM9KDc` (order `ACP-20260902-E16DD7`), and the payment now reads `status: refunded, refund_status: full` at Razorpay. |
 | 5 | **Saved card ≠ Razorpay rails** | Razorpay test mode cannot charge a stored card server-side without real tokenisation. Saved-method purchases settle through `MockGateway`. The UI states this. Intentional, not a bug. |
 | 6 | **`/merchant` ships ~110 kB JS** | Recharts. Fine, but the obvious thing to trim. |
-| 7 | **Multi-merchant checkout is sequential** | Carts are per-merchant by design (checkout, Cart Mandate and fulfilment all are). A shopper with 3 merchants checks out 3 times. |
+| 7 | ~~Multi-merchant checkout is sequential~~ **CLOSED** | One checkout, one payment, N orders. `server/commerce/group-checkout.ts`; `checkout_groups` table. Carts stay per-merchant (fulfilment and Cart Mandates are), but the shopper pays once. |
 | 8 | ~~Product creation has two paths~~ **CLOSED** | Both actions now write through `createProductWithVariants()` in `server/catalog/create-product.ts`. Parsing stays per-form (they take genuinely different input); writing is shared. Covered by `create-product.test.ts` (18 tests). |
 | 9 | **`MAX_VARIANTS = 24`** | The wizard refuses larger cartesian products and asks the merchant to trim. Covered by tests; the user's 18-variant product passed under the cap, so the *refusal* path is still untested by hand. |
 
@@ -103,78 +103,56 @@ Read `NOTES.md` first for architecture and conventions. This file is the state s
 
 ## 3a. Changes in this session
 
-### Refunds (gap #4) — closed and verified live
-1. `refundPayment()` on the `PaymentGateway` interface, `RazorpayGateway`
-   (`POST /v1/payments/:id/refund`) and `MockGateway`. `pending` is modelled as success, not
-   failure — netbanking refunds settle asynchronously, which the live test confirmed.
-2. `gatewayByName()` resolves the gateway from `payments.gateway` so a refund goes back on the
-   rails the charge came in on.
-3. `server/commerce/refund.ts` — pure `evaluateRefund()` / `canOfferRefund()`, outside the
-   `"use server"` boundary (§8.14). **The stock decision is why it is pure:** `paid` restocks,
-   `fulfilled` does not (delivered), `canceled` does not (`cancelOrderAction` already returned it).
-4. `refundOrderAction()` — I/O only, audited, refuses rather than throws.
-5. `refund.processed` / `refund.created` webhook branch: marks state, never touches stock, because
-   it cannot tell a dashboard refund from one issued here.
-6. Two-step "Refund → Confirm refund" control on `/merchant/orders`, shown only where a captured
-   payment exists, gated by the shared `canOfferRefund()`.
-7. **Live verification:** `rfnd_TX7KZh0dBNJR1z`, ₹5,072.82 returned on `pay_TX2SoFHFrM9KDc`
-   (`ACP-20260902-E16DD7`), issued through the real `RazorpayGateway.refundPayment()`. Razorpay now
-   reports that payment `refunded / full`. The local row was reconciled to match, with stock
-   returned (the order was `paid`, never dispatched).
-
-### Two real bugs found while doing the above
-8. **`composeTitle` threw for any brand containing a regex metacharacter.** The escape replacement
-   in `product-assistant.ts` was a pasted doc comment instead of `"$&"` — exactly the §8.2 hazard.
-   `Dr. Martens`, `A.P.C.`, `M+S`, `(Di)vision` all produced
-   `SyntaxError: Invalid regular expression … Nothing to repeat`. The 13 existing tests passed only
-   because Nike/Adidas/Peak/Stride contain no special characters. Fixed, +2 regression tests.
-9. **`payments.gateway` recorded the wrong gateway.** `confirmPayment()` set `state` and
-   `gatewayPaymentId` on capture but not `gateway`, so the column kept whatever `authorizeCheckout`
-   wrote — the *configured* gateway, not the one that settled. A saved-method purchase made while
-   `PAYMENT_GATEWAY=razorpay` was therefore labelled `razorpay_test` despite settling on
-   `MockGateway`, and refunding it would post a mock payment id to Razorpay. Found because
-   `pay_saved_rzp_1` came back "The id provided does not exist" from the live API. Fixed at the
-   capture site, +1 regression assertion in `payments.test.ts`.
-10. **669 seeded payments were mislabelled `razorpay_test`** with fabricated ids. Refund would have
-    failed on every demo order. `seed.ts` now labels them `mock`, and the existing rows were
-    relabelled. Exactly 3 `razorpay_test` payments remain, all genuinely real.
+### Refunds (gap #4) — closed, verified live
+`refundPayment()` on the gateway interface and both implementations; pure `evaluateRefund()` /
+`canOfferRefund()` in `server/commerce/refund.ts`; `refundOrderAction()` behind a two-step confirm
+at `/merchant/orders`; `refund.processed` webhook branch. **The stock decision is why the rules are
+pure**: `paid` restocks, `fulfilled` does not (delivered), `canceled` does not (cancel already
+returned it). Verified live: `rfnd_TX7KZh0dBNJR1z`, ₹5,072.82 on `pay_TX2SoFHFrM9KDc`.
 
 ### Product creation consolidated (gap #8) — closed
-11. **One writer, two parsers.** `server/catalog/create-product.ts` now owns every product write;
-    `createProductAction` and `createAssistedProductAction` do auth, parsing and redirects only.
-    Parsing stays separate because the inputs genuinely differ (typed `key: value` lines + one
-    variant vs. model JSON + N axes); writing must not.
-12. Closed the three drifts: the manual form now writes `searchTags` (it wrote none, costing it the
-    measured 2.5x weight-A advantage), the duplicated SKU builders collapsed to one, and
-    `MAX_VARIANTS` plus duplicate-combo rejection now bind every caller.
-13. `deriveSearchTags()` gives the manual path deterministic tags with **no LLM call**, so that
-    form stays usable when Groq is rate-limited (§8.13). The bare brand is excluded, matching the
-    assistant's prompt.
-14. **Latent SKU collision fixed.** `slugFragment` truncates to 4 chars, so "Large" and "Larger"
-    both yield `LARG`. The wizard generated a batch's SKUs concurrently, so two variants could
-    agree on a base neither had inserted, violating `variants_sku_idx`. Reservation is now
-    sequential with a local reserved-set. Integration test covers it.
-15. `parseAttributeLines` moved out of `"use server"` into `catalog/attributes.ts` — as an export
-    of a `"use server"` module it was needlessly a POST endpoint (§7) and untestable.
-16. `create-product.test.ts` added (18 tests: validation rules, `comboKey`, tag derivation,
-    attribute parsing, plus integration proving the write, the SKU collision and that an invalid
-    batch writes nothing).
+One writer, two parsers: `server/catalog/create-product.ts` owns every product write; the manual
+action and the wizard do auth, parsing and redirects only. Closed three drifts — the manual form
+wrote no `searchTags` (2.5× ranking penalty), duplicated SKU builders, and only the wizard bounded
+the variant count. `deriveSearchTags()` is deterministic, so the manual form works with no model.
 
-### A fourth bug, found by actually looking at the page
-17. **Correlated subqueries on `/merchant/orders` were silently returning nothing.** Interpolating
-    a column into a `` sql`` `` template renders it *unqualified*, so
-    `` `WHERE ${orderItems.orderId} = ${orders.id}` `` became `WHERE "order_id" = "id"` and
-    Postgres bound BOTH names to the inner table: `order_items.order_id = order_items.id`, always
-    false. Every row had shown "0 units" and a blank product title since before this session — and
-    my `hasCapturedPayment` EXISTS, written in the same style, was always false, so **the Refund
-    button never rendered at all**. Fixed by aliasing the inner table and naming the outer one in
-    full. Audited every other `` sql`` `` template in the repo: no other instance (the three that
-    interpolate `${x.y}` are JS values, which become bind parameters and are safe). New gotcha
-    §8.17. Also fixed "1 units" → "1 unit" on the same page.
+### Shoe catalogue (feature 4)
+**74 new footwear products** (86 total) across 12 categories, 8 invented brands, 9 merchants — with
+real spread on purpose, colour, size, width and price so the clarifying questions have something to
+narrow. 5 new merchants (Fleetfoot Running, Sole Republic, Oxford & Last, The Shoe Locker, Field &
+Court). Seeder logic extracted to `db/expansion.ts`, shared with `seed-extra`. Run with
+`npm run db:seed-shoes`. Measured search relevance on the new catalogue: 0.54–0.73 across
+marathon / formal / football / sneaker / walking / kids queries, all clear of the 0.34 gate.
 
-**Browser-verified over HTTP** after restarting the dev server: 34 Refund buttons render, product
-titles and unit counts are correct, and the live-refunded order `ACP-20260902-E16DD7` shows
-`refunded` with no Refund control (`canOfferRefund` correctly withdraws it).
+### Conversational agent (feature 1)
+`clarify.ts` + an ASK step. "I want shoes" → purpose → size → colour → ranked options.
+Rules own the slots; the model only phrases. `clarificationNeeded` is now rule-owned too — the
+model was answering "I want shoes" with "How many shoes do you need?".
+UI: `clarify-panel.tsx` with rationale, chips, free text, a running transcript and a
+"just show me options" escape hatch.
+
+### One checkout across merchants (feature 3, gap #7)
+`checkout_groups` table + `orders.checkout_group_id` (migration 0005). N Cart Mandates, N orders,
+ONE gateway order, one payment row per order. `authorizeCheckout({ deferPayment: true })` lets the
+group layer own the charge without duplicating the mandate/policy logic.
+**Found and closed a governance hole this introduced:** per-cart limit checks all measure against
+the same "already committed today" figure, so three baskets that each fit the headroom could exceed
+it together — splitting across merchants would have been a way past a daily limit. The combined
+total is now re-checked. Baskets that cannot be included are returned in `excluded` and displayed.
+Webhooks now settle every payment sharing a gateway order, not just the first.
+
+### Payment choice + visible agent workflow (feature 2)
+At checkout the shopper picks **"I'll pay myself"** (the genuine Razorpay window) or **"Let the
+agent pay"** (server-side settlement with a live step list). Steps are appended only AFTER the work
+they describe succeeded, so the timeline is a record rather than an animation.
+**Constraint:** Razorpay Checkout is a cross-origin iframe — no script can type into it, and a
+fake Razorpay-looking form would be a spoof of a real company's payment UI. So the agent path
+settles server-side through `MockGateway` (as saved-method purchases already do, gap #5) and says
+so on screen.
+
+**Verified over HTTP:** conversation turns, the group proposal (included + excluded + combined
+total), the single cart checkout button, the tick screen. **Not browser-verified:** the payment
+choice and the agent step list render only after hydration, so they need a click-through.
 
 ## 3b. Changes in the session before this one
 

@@ -199,6 +199,26 @@ The writer owns validation, SKU reservation, inventory and re-indexing; the acti
 auth, parsing and redirects only. `deriveSearchTags()` gives the manual path deterministic tags
 with **no LLM call**, so that form keeps working when the model is rate-limited.
 
+### Conversational shopping (`server/agents/customer/clarify.ts`)
+An **ASK** step runs before SEARCH. When a request is too broad to rank honestly ("I want shoes"),
+the agent asks instead of guessing — purpose, then size, then colour, capped at `MAX_QUESTIONS = 3`.
+**Rules decide which slot is missing and what the options are; the model only phrases things**
+(§8.8). Options are catalogue-derived, so the agent can only ask about what it can search on. A
+skipped answer stays NULL — silence never becomes a filter. Answers are folded back into the
+shopper's own message and re-parsed by the SAME intent parser, so chips and free text cannot drift.
+
+### Group checkout (`server/commerce/group-checkout.ts`)
+One payment across merchants. Carts stay per-merchant because fulfilment, returns and the AP2 Cart
+Mandate all are — a merchant can only sign for their own basket. The group is the **settlement**
+unit: N Cart Mandates, N orders, **ONE** gateway order, and one payment row per order sharing its
+id so refunds stay per-merchant. `authorizeCheckout({ deferPayment: true })` builds an order
+without touching the gateway; the group layer then creates the single charge.
+**The combined total is re-checked against the policy limits.** Per-cart checks all measure against
+the same "already committed today" figure, so baskets that each fit the remaining headroom can
+exceed it together — without the group check, splitting a purchase across merchants would be a way
+to spend past a daily limit. Baskets that cannot be included are returned in `excluded` and shown,
+never silently dropped from a combined total.
+
 ### Protocols
 - **MCP**: 6 tools, stdio (`npm run mcp:stdio`) + stateless JSON-RPC at `/api/mcp`. No tool can
   charge; `prepare_purchase` returns an authorization URL.
@@ -278,6 +298,9 @@ with **no LLM call**, so that form keeps working when the model is rate-limited.
     **In a correlated subquery, alias the inner table and name the outer one in full:**
     `` sql`(SELECT ... FROM ${orderItems} AS oi WHERE oi.order_id = orders.id)` ``.
     Interpolating a *value* (`${sessionId}`) is safe and unaffected — it becomes a bind parameter.
+18. **A gateway order can cover several payments.** Group checkout settles N orders against one
+    gateway order, so any lookup by `gatewayOrderId` must handle a LIST — taking the first row
+    leaves every other merchant's order stuck in `pending_payment` while the money has moved.
 
 
 

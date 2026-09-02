@@ -105,6 +105,41 @@ export const checkoutSessions = pgTable(
   (t) => [uniqueIndex("checkout_idempotency_idx").on(t.merchantId, t.idempotencyKey)],
 );
 
+export const checkoutGroupState = pgEnum("checkout_group_state", [
+  "open",
+  "authorized",
+  "paid",
+  "failed",
+  "canceled",
+]);
+
+/**
+ * One payment spanning several merchants.
+ *
+ * Carts stay per-merchant because fulfilment, Cart Mandates and payouts all
+ * are — a merchant can only sign for their own basket. The group is the
+ * SETTLEMENT unit, not the fulfilment unit: it owns the single gateway order
+ * the shopper actually pays, and the per-merchant orders reference it.
+ */
+export const checkoutGroups = pgTable(
+  "checkout_groups",
+  {
+    id: pk(),
+    userId: varchar("user_id", { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: checkoutGroupState("state").notNull().default("open"),
+    /** Sum across every order in the group — what the gateway is asked for. */
+    totals: jsonb("totals").$type<Totals>().notNull(),
+    gatewayOrderId: varchar("gateway_order_id", { length: 120 }),
+    merchantCount: integer("merchant_count").notNull().default(0),
+    agentSessionId: varchar("agent_session_id", { length: 36 }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("checkout_groups_user_idx").on(t.userId)],
+);
+
 export const orderState = pgEnum("order_state", [
   "pending_payment",
   "paid",
@@ -126,6 +161,8 @@ export const orders = pgTable(
       .notNull()
       .references(() => merchants.id, { onDelete: "restrict" }),
     checkoutSessionId: varchar("checkout_session_id", { length: 36 }),
+    /** Set when this order was paid together with other merchants' orders. */
+    checkoutGroupId: varchar("checkout_group_id", { length: 36 }),
     state: orderState("state").notNull().default("pending_payment"),
     totals: jsonb("totals").$type<Totals>().notNull(),
     /** Non-null when an AI agent placed this order — powers agent-vs-human analytics. */
@@ -137,6 +174,7 @@ export const orders = pgTable(
   (t) => [
     index("orders_merchant_created_idx").on(t.merchantId, t.createdAt),
     index("orders_user_idx").on(t.userId),
+    index("orders_checkout_group_idx").on(t.checkoutGroupId),
   ],
 );
 

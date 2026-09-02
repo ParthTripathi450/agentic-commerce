@@ -36,6 +36,13 @@
       "when": 1788329405857,
       "tag": "0004_typical_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788347356894,
+      "tag": "0005_checkout_groups",
+      "breakpoints": true
     }
   ]
 }

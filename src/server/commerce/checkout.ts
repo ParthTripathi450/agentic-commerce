@@ -290,6 +290,22 @@ export type AuthorizeResult =
       currency: string;
       paymentMandateId: string;
     }
+  /**
+   * Order created, payment deliberately not started.
+   *
+   * Returned only when `deferPayment` is set, which is how a multi-merchant
+   * group checkout builds N orders and then settles them with ONE gateway
+   * order instead of N.
+   */
+  | {
+      status: "order_created";
+      orderId: string;
+      orderNumber: string;
+      amountMinor: number;
+      currency: string;
+      paymentMandateId: string;
+      agentSessionId: string;
+    }
   | { status: "rejected"; reason: string }
   | { status: "failed"; reason: string; checks?: string[] };
 
@@ -305,6 +321,14 @@ export async function authorizeCheckout(input: {
   decision: "approve" | "reject";
   sessionId?: string;
   note?: string;
+  /**
+   * Stop after the order exists, leaving the caller to create the gateway
+   * order and payment rows. Used by group checkout so several merchants'
+   * orders share a single charge.
+   */
+  deferPayment?: boolean;
+  /** Stamped on the order so its group can be found later. */
+  checkoutGroupId?: string;
 }): Promise<AuthorizeResult> {
   const [approval] = await db
     .select()
@@ -422,6 +446,7 @@ export async function authorizeCheckout(input: {
       userId: input.userId,
       merchantId: session.merchantId,
       checkoutSessionId: session.id,
+      checkoutGroupId: input.checkoutGroupId ?? null,
       state: "pending_payment",
       totals: cart.totals,
       agentSessionId: sessionId,
@@ -440,6 +465,20 @@ export async function authorizeCheckout(input: {
       unitPriceMinor: line.currentPriceMinor,
     })),
   );
+
+  // Group checkout stops here: the caller creates ONE gateway order covering
+  // every merchant, then one payment row per order against it.
+  if (input.deferPayment) {
+    return {
+      status: "order_created",
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      amountMinor: cart.totals.totalMinor,
+      currency: cart.totals.currency,
+      paymentMandateId: paymentMandate.id,
+      agentSessionId: sessionId,
+    };
+  }
 
   const gateway = paymentGateway();
   let gatewayOrder;

@@ -101,7 +101,12 @@ export async function payWithSavedMethod(input: {
   if (authorized.status !== "authorized") {
     return {
       status: "failed",
-      reason: authorized.status === "rejected" ? authorized.reason : authorized.reason,
+      // "order_created" cannot occur here — this call never sets deferPayment —
+      // but the union includes it, so say something sane rather than crash.
+      reason:
+        "reason" in authorized
+          ? authorized.reason
+          : "The order was created but no payment was started.",
       checks: "checks" in authorized ? authorized.checks : undefined,
     };
   }

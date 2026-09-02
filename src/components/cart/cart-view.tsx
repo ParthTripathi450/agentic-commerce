@@ -46,18 +46,36 @@ export function CartList({ carts }: { carts: CartView[] }) {
     );
   }
 
+  // Blocking issues are per-merchant, but they stop the single checkout, so
+  // they have to be surfaced at the top rather than only on the offending card.
+  const blocked = carts.filter((c) => c.issues.some((i) => i.kind !== "price_changed"));
+  const total = carts.reduce((sum, c) => sum + c.totals.totalMinor, 0);
+
   return (
     <div className="space-y-4">
       {carts.length > 1 ? (
         <Alert tone="info">
-          You have items from {carts.length} merchants. Each is checked out separately — an order,
-          its signed cart mandate and its delivery all belong to one merchant.
+          Items from {carts.length} merchants. You check out and pay <strong>once</strong>; each
+          merchant still gets its own order, signed cart mandate and delivery.
         </Alert>
       ) : null}
 
       {carts.map((cart) => (
         <MerchantCart key={cart.cartId} cart={cart} />
       ))}
+
+      <CheckoutAll
+        cartCount={carts.length}
+        totalMinor={total}
+        disabled={blocked.length > 0}
+        blockedReason={
+          blocked.length > 0
+            ? `Resolve the issue${blocked.length === 1 ? "" : "s"} above (${blocked
+                .map((c) => c.merchant.name)
+                .join(", ")}) before checking out.`
+            : null
+        }
+      />
     </div>
   );
 }
@@ -178,23 +196,53 @@ function MerchantCart({ cart }: { cart: CartView }) {
           </div>
         </dl>
 
-        <CheckoutButton cartId={cart.cartId} disabled={blocking.length > 0 || pending} />
       </CardBody>
     </Card>
   );
 }
 
-function CheckoutButton({ cartId, disabled }: { cartId: string; disabled: boolean }) {
+/**
+ * One button for the whole cart, however many merchants are in it.
+ *
+ * Baskets stay separate above — different merchants, different shipping and
+ * different return policies — but the shopper pays once.
+ */
+function CheckoutAll({
+  cartCount,
+  totalMinor,
+  disabled,
+  blockedReason,
+}: {
+  cartCount: number;
+  totalMinor: number;
+  disabled: boolean;
+  blockedReason: string | null;
+}) {
   const router = useRouter();
   return (
-    <Button
-      size="lg"
-      className="w-full"
-      disabled={disabled}
-      onClick={() => router.push(`/checkout?cart=${cartId}`)}
-    >
-      Check out
-    </Button>
+    <Card className="border-2 border-primary/30">
+      <CardBody className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm font-medium">
+            {cartCount > 1
+              ? `${cartCount} merchants · one payment`
+              : "Ready to check out"}
+          </p>
+          <p className="text-xl font-semibold tabular">{formatMoney(totalMinor)}</p>
+        </div>
+        {blockedReason ? (
+          <p className="text-xs text-danger">{blockedReason}</p>
+        ) : cartCount > 1 ? (
+          <p className="text-xs text-muted-foreground">
+            You are charged once. Each merchant ships separately, so each delivery charge above is
+            included in this total.
+          </p>
+        ) : null}
+        <Button size="lg" className="w-full" disabled={disabled} onClick={() => router.push("/checkout")}>
+          Check out
+        </Button>
+      </CardBody>
+    </Card>
   );
 }
 

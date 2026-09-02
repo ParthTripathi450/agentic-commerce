@@ -85,26 +85,48 @@ export async function handleRazorpayWebhook(
     return { status: "ignored", detail: `Event ${event.event} carries no order reference.` };
   }
 
-  const [payment] = await db
+  /*
+   * A gateway order can now cover SEVERAL payments.
+   *
+   * Multi-merchant checkout settles N orders against one gateway order, so
+   * taking only the first payment row here would leave every other merchant's
+   * order stuck in pending_payment while the shopper's money had moved.
+   */
+  const matched = await db
     .select()
     .from(payments)
-    .where(eq(payments.gatewayOrderId, gatewayOrderId))
-    .limit(1);
+    .where(eq(payments.gatewayOrderId, gatewayOrderId));
 
-  if (!payment) {
+  if (matched.length === 0) {
     await markProcessed(stored.id, "no matching payment");
     return { status: "ignored", detail: "No payment matches that gateway order." };
   }
 
-  const [order] = await db.select().from(orders).where(eq(orders.id, payment.orderId)).limit(1);
-  if (!order) {
+  const outcomes: WebhookOutcome[] = [];
+  for (const payment of matched) {
+    const [order] = await db.select().from(orders).where(eq(orders.id, payment.orderId)).limit(1);
+    if (!order) continue;
+    outcomes.push(
+      await applyEvent(event.event, order, payment, entity, event.payload?.refund?.entity),
+    );
+  }
+
+  if (outcomes.length === 0) {
     await markProcessed(stored.id, "no matching order");
     return { status: "ignored", detail: "No order matches that payment." };
   }
 
-  const outcome = await applyEvent(event.event, order, payment, entity, event.payload?.refund?.entity);
-  await markProcessed(stored.id, outcome.detail);
-  return outcome;
+  // Processed if ANY order moved; a group where one part was already settled
+  // must not report the whole event as a duplicate.
+  const outcome =
+    outcomes.find((o) => o.status === "processed") ??
+    outcomes.find((o) => o.status === "duplicate") ??
+    outcomes[0];
+  const detail =
+    outcomes.length === 1 ? outcome.detail : `${outcome.detail} (${outcomes.length} orders in group)`;
+
+  await markProcessed(stored.id, detail);
+  return { ...outcome, detail };
 }
 
 async function applyEvent(
