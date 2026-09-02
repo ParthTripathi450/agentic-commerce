@@ -3,14 +3,13 @@
 Read `NOTES.md` first for architecture and conventions. This file is the state snapshot.
 
 **Last updated:** 2026-09-02
-**Health:** 101 tests passing (17 files), stable across 3 consecutive runs · 0 lint issues ·
-production build clean · 34 route files · 31 tables
-**Git:** clean tree, 4 commits, pushed to `origin/main`
-(`efde7f1 Merchant listing assistant with weighted search tags`)
+**Health:** 114 tests passing (18 files) · 0 lint issues · production build clean ·
+34 route files · 31 tables
+**Git:** pushed to `origin/main`
 **Repo:** https://github.com/ParthTripathi450/agentic-commerce-platform (private)
 
-**Local data:** 13 merchants · 66 active products · 321 variants · 27 categories · 910 orders ·
-24 users · 66/66 indexed · **65/66 have images** (one generation failed)
+**Local data:** 13 merchants · 68 active products · 340 variants · 27 categories · 910 orders ·
+24 users · 68/68 indexed · **68/68 have images**
 
 ---
 
@@ -61,19 +60,19 @@ production build clean · 34 route files · 31 tables
 
 | # | Issue | Notes |
 |---|---|---|
-| 1 | **Listing wizard not exercised end-to-end** | The assistant module was tested against the live LLM and the pages render, but **no product has actually been created through the wizard**. `createAssistedProductAction` has no test. **This is the highest-value next step.** |
+| 1 | ~~Listing wizard not exercised end-to-end~~ **CLOSED** | The user created two products through it: *Ultraboost Running Shoes* (18 variants / 18 inventory rows / 360 units) and *Nike Air Zoom Pegasus* (1 / 1 / 10). Both indexed with `tags_text` populated. Pure logic now covered by `listing.test.ts` (13 tests). |
 | 2 | **Not deployed** | Runs on local Postgres. `README.md` has the Supabase + Vercel steps. Storage (`STORAGE_DRIVER=supabase`) and webhooks both need a public origin. |
-| 3 | **One product image missing** | 65/66. Re-run `npm run catalog:images` (skips existing). |
+| 3 | ~~One product image missing~~ **CLOSED** | 68/68. `npm run catalog:images` generated the 3 outstanding ones. |
 | 4 | **Refunds not implemented** | Cancelling a paid order returns stock and tells the merchant to refund in the Razorpay dashboard. |
 | 5 | **Saved card ≠ Razorpay rails** | Razorpay test mode cannot charge a stored card server-side without real tokenisation. Saved-method purchases settle through `MockGateway`. The UI states this. Intentional, not a bug. |
 | 6 | **`/merchant` ships ~110 kB JS** | Recharts. Fine, but the obvious thing to trim. |
 | 7 | **Multi-merchant checkout is sequential** | Carts are per-merchant by design (checkout, Cart Mandate and fulfilment all are). A shopper with 3 merchants checks out 3 times. |
 | 8 | **Product creation has two paths** | `NewProductForm` (manual) and `ListingWizard` (assisted) use different actions (`createProductAction` vs `createAssistedProductAction`). Only the manual one predates this session. Consider consolidating. |
-| 9 | **`MAX_VARIANTS = 24`** | The wizard refuses larger cartesian products and asks the merchant to trim. Not yet user-tested. |
+| 9 | **`MAX_VARIANTS = 24`** | The wizard refuses larger cartesian products and asks the merchant to trim. Covered by tests; the user's 18-variant product passed under the cap, so the *refusal* path is still untested by hand. |
 
 ---
 
-## 3. Changes in the most recent session
+## 3. Changes in the previous session
 
 1. **GitHub repo created and pushed** (private). Verified `.env.local`/`node_modules` excluded and
    scanned staged content for the Razorpay/Groq keys before the first push.
@@ -99,6 +98,32 @@ production build clean · 34 route files · 31 tables
 
 ---
 
+## 3a. Changes in this session
+
+1. **Brand duplication in assisted titles fixed.** The wizard produced
+   *"Nike Nike Air Zoom Pegasus"*. Cause: the deterministic fallback (which runs when the LLM
+   call fails — here almost certainly a Groq rate-limit; the row's signature was
+   `search_tags: ["nike","running shoes"]` with an empty description) did
+   `` `${brand} ${productName}` `` unconditionally, and the merchant had already typed the brand
+   into the product name. Now both the fallback and the LLM path go through
+   `composeTitle()` in `product-assistant.ts`, which skips the prefix when the name already
+   contains the brand as a whole word (case-insensitive, boundary-anchored so "Peak" is not
+   found inside "Peakless"). The fallback also no longer seeds the bare brand as a tag —
+   the tag prompt explicitly excludes it.
+2. **The affected product row was corrected in place** to `Nike Air Zoom Pegasus` and
+   reindexed. If the user wanted the old title, it is editable at
+   `/merchant/products/0cae1b1f-5759-445b-b25d-73ce7d15ae32`.
+3. **`buildVariantCombos` + `MAX_VARIANTS` extracted** into
+   `src/server/agents/merchant/variants.ts`. They lived in `listing-actions.ts`, which is
+   `"use server"` and imports next-auth — that module cannot load under Vitest, so the logic
+   was untestable where it was. Pure functions now live outside the server-action boundary.
+4. **`src/server/agents/merchant/listing.test.ts` added** (13 tests): brand-duplication and
+   word-boundary cases for `composeTitle`, cartesian expansion / empty-axis / at-the-cap /
+   over-the-cap for `buildVariantCombos`, and normalisation + the 14-tag cap for `dedupeTags`.
+5. **Missing product images generated** — 3 outstanding, now 68/68.
+
+---
+
 ## 4. Pending decisions for the user
 
 - **Repo visibility**: currently private. `gh repo edit --visibility public` to change.
@@ -112,15 +137,12 @@ production build clean · 34 route files · 31 tables
 
 ## 5. Exact next steps
 
-1. **Create a product through the wizard end-to-end and fix whatever breaks.** Log in as
-   `care@stride.test`, go to `/merchant/products/new`, run item → brand → product → details →
-   Create. Confirm: product row, variants with correct SKUs, inventory rows, `search_tags`
-   populated, `catalog_documents.tags_text` non-empty, and the product findable by one of its tags.
-   Then add a test for `createAssistedProductAction` covering the `MAX_VARIANTS` refusal and the
-   tag round-trip.
-2. **Re-run `npm run catalog:images`** for the one missing image.
-3. **Deploy** if the user provides Supabase/Vercel access (see `README.md` §Deploying).
-4. Optional: refunds; trim the `/merchant` bundle; richer table UI.
+1. **Deploy** if the user provides Supabase/Vercel access (see `README.md` §Deploying).
+   This is the only remaining item that blocks calling the project finished.
+2. Decide gap #8 — whether to consolidate `createProductAction` and
+   `createAssistedProductAction` into one path.
+3. Optional: refunds; trim the `/merchant` bundle; richer table UI (avatar stacks, inline
+   progress bars, row action icons from `123image.png`).
 
 ---
 
@@ -138,3 +160,10 @@ production build clean · 34 route files · 31 tables
   **Always `grep` after a scripted edit to confirm the anchor matched.**
 - Colours the user chose explicitly: best-match border `#E4DA72`, agent CTA `#3E0F8D`,
   primary `#7F56D9`, sidebar `#101828`, page `#f7f8fa`, cards `#ffffff`.
+- **The listing assistant's deterministic fallback is not a rare path.** Groq rate-limits, and
+  when it does, `buildFallbackDraft()` is what the merchant actually sees. Every change to the
+  LLM path needs the same change in the fallback — the brand-duplication bug was exactly this
+  omission. Both now share `composeTitle()`.
+- **Do not put pure logic inside a `"use server"` module.** Those files import next-auth, which
+  fails to load under Vitest, so anything in them is untestable. Extract to a plain module
+  (`variants.ts` is the pattern) and import it back.

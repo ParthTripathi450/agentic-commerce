@@ -232,6 +232,14 @@ asserts that. Enabling a method generates fabricated display metadata server-sid
 11. **Integration tests mutate real data.** Use `provisionTestShopper()` + `ensureStock()` +
     `emptyOpenCarts()` from `server/commerce/test-utils.ts`, and `fileParallelism: false`.
 12. Free-tier LLMs rate-limit under test load; tests must tolerate `degraded: true`.
+13. **Every LLM path has a deterministic fallback, and the fallback is a *normal* path, not an
+    edge case** — Groq rate-limits regularly, and `buildFallbackDraft()` is then what the merchant
+    actually sees. A change to the model path that is not mirrored in the fallback is a bug:
+    that is precisely how the wizard shipped *"Nike Nike Air Zoom Pegasus"*. Shared logic belongs
+    in a helper both call (`composeTitle()`).
+14. **Never put pure logic inside a `"use server"` module.** Those files import next-auth, which
+    cannot load under Vitest, so anything defined there is untestable. Extract it to a plain module
+    and import it back — `server/agents/merchant/variants.ts` is the pattern.
 
 ---
 

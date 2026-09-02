@@ -16,6 +16,7 @@ import {
   suggestBrands,
   suggestProducts,
 } from "./product-assistant";
+import { buildVariantCombos, MAX_VARIANTS } from "./variants";
 
 /**
  * Assisted listing.
@@ -48,9 +49,6 @@ export async function generateDraftAction(input: {
   // in a stable shape; the degraded flag is what the UI needs.
   return { ...draft, meta: undefined };
 }
-
-/** Cap on generated variants, so a 10×5 axis pair cannot create 50 SKUs by accident. */
-const MAX_VARIANTS = 24;
 
 const createSchema = z.object({
   title: z.string().min(3).max(240),
@@ -115,18 +113,13 @@ export async function createAssistedProductAction(_prev: unknown, formData: Form
   const tags = dedupeTags(parseJson<string[]>(data.tagsJson, []));
   const axes = parseJson<Record<string, string[]>>(data.axesJson, {});
 
-  // Cartesian product of the axis values the merchant kept.
-  let combos: Record<string, string>[] = [{}];
-  for (const [axis, values] of Object.entries(axes)) {
-    const kept = values.filter(Boolean);
-    if (kept.length === 0) continue;
-    combos = combos.flatMap((combo) => kept.map((v) => ({ ...combo, [axis]: v })));
-  }
-  if (combos.length > MAX_VARIANTS) {
+  const built = buildVariantCombos(axes);
+  if (!built.ok) {
     return {
-      error: `That would create ${combos.length} variants. Trim the options to ${MAX_VARIANTS} or fewer, then add the rest from the product page.`,
+      error: `That would create ${built.count} variants. Trim the options to ${MAX_VARIANTS} or fewer, then add the rest from the product page.`,
     };
   }
+  const combos = built.combos;
 
   const [product] = await db
     .insert(products)

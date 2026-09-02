@@ -212,10 +212,13 @@ export async function generateProductDraft(input: {
   const vocabulary = await getVocabulary();
 
   const fallback = (): ProductDraft => ({
-    title: `${input.brand} ${input.productName}`.trim(),
+    title: composeTitle(input.brand, input.productName),
     description: "",
     attributes: {},
-    tags: [input.brand.toLowerCase(), ...(input.category ? [input.category.toLowerCase()] : [])],
+    // Not the brand: it is already a structured field the index matches on, and
+    // the tag prompt explicitly excludes it. Category words are what a shopper
+    // would actually type.
+    tags: dedupeTags(input.category ? input.category.split(/\s+/).concat(input.category) : []),
     variantAxes: {},
     degraded: true,
   });
@@ -262,7 +265,7 @@ Reply with JSON only:
     );
 
     return {
-      title: normalizeTypography(value.title),
+      title: composeTitle(input.brand, normalizeTypography(value.title)),
       description: normalizeTypography(value.description),
       attributes: value.attributes,
       tags: dedupeTags(value.tags.map((t) => normalizeTypography(t))),
@@ -273,6 +276,26 @@ Reply with JSON only:
   } catch {
     return fallback();
   }
+}
+
+/**
+ * Joins a brand and a product name without repeating the brand.
+ *
+ * Suggested product names usually already carry the brand ("Nike Air Zoom
+ * Pegasus"), so a naive `${brand} ${product}` produced titles like
+ * "Nike Nike Air Zoom Pegasus" on the fallback path.
+ */
+export function composeTitle(brand: string, productName: string): string {
+  const product = productName.trim();
+  const label = brand.trim();
+  if (!label) return product;
+  if (!product) return label;
+
+  // Word-boundary check so "Peak" does not match inside "Peakless".
+  const alreadyNamed = new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, "\\/** Lower-cased, trimmed, de-duplicated; tags are matched, not displayed as prose. */")}\\b`, "i").test(
+    product,
+  );
+  return alreadyNamed ? product : `${label} ${product}`;
 }
 
 /** Lower-cased, trimmed, de-duplicated; tags are matched, not displayed as prose. */
