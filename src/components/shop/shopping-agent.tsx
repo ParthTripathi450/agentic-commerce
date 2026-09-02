@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import { ChevronDown, ShieldCheck, ShoppingCart, Sparkles } from "lucide-react";
-import { Alert, Badge, Button, Card, CardBody, Input } from "@/components/ui";
+import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -13,10 +13,7 @@ import { PurchaseFlow } from "./purchase-flow";
 import { QuantityStepper } from "@/components/cart/quantity-stepper";
 import { addToCartAction } from "@/server/commerce/cart-actions";
 import { AutonomousFlow } from "./autonomous-flow";
-import { ClarifyPanel, ConversationTrail } from "./clarify-panel";
-// The same pure helper the agent uses server-side, so chips and free text are
-// folded into the message identically on both sides.
-import { applyAnswer, type SlotId } from "@/server/agents/customer/clarify";
+import { ChatPanel, type ChatMessage } from "./chat-panel";
 import { FeaturedGrid } from "./featured-grid";
 import type { FeaturedProduct } from "@/server/catalog/featured";
 
@@ -39,76 +36,119 @@ export function ShoppingAgent({
   savedMethod: string | null;
 }) {
   const [autonomous, setAutonomous] = useState(false);
-  const [query, setQuery] = useState(initialQuery ?? "");
   const [turn, setTurn] = useState<TurnDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   /**
-   * The conversation so far.
+   * The conversation.
    *
-   * `message` accumulates the shopper's answers as natural language, so every
-   * turn is re-parsed by the SAME intent parser — there is no second path that
-   * turns chips straight into filters and drifts from it.
+   * `history` is what the MODEL reads — the full transcript, so a later reply
+   * can reinterpret an earlier one ("actually make that wide fit") rather than
+   * only appending to it. `messages` is what the shopper sees.
    */
-  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [history, setHistory] = useState<{ role: "shopper" | "agent"; content: string }[]>([]);
   const [answered, setAnswered] = useState<string[]>([]);
-  const [trail, setTrail] = useState<{ question: string; answer: string }[]>([]);
+  const [chips, setChips] = useState<{ label: string; value: string }[]>([]);
 
-  const run = useCallback(async function run(
-    message: string,
-    answered: string[] = [],
-    skipQuestions = false,
-  ) {
-    if (!message.trim()) return;
-    setPending(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/agent/shop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, answered, skipQuestions }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        setError(data.error ?? "The agent could not complete that request.");
-        setTurn(null);
-      } else {
-        setTurn(data as TurnDto);
+  /**
+   * One conversational turn.
+   *
+   * Sends the shopper's words plus the transcript so far. The agent decides
+   * whether it understands enough to search or needs to ask again — that
+   * judgement lives server-side in `conversation.ts`, not here.
+   */
+  const send = useCallback(
+    async function send(
+      text: string,
+      opts: { reset?: boolean; skipQuestions?: boolean } = {},
+    ) {
+      const trimmed = text.trim();
+      if (!trimmed && !opts.skipQuestions) return;
+
+      const priorHistory = opts.reset ? [] : history;
+      const priorAnswered = opts.reset ? [] : answered;
+
+      if (trimmed) {
+        setMessages((m) => (opts.reset ? [] : m).concat({ role: "shopper", content: trimmed }));
       }
-    } catch {
-      setError("Could not reach the shopping agent. Check that the server is running.");
-    } finally {
-      setPending(false);
-    }
-  }, []);
+      setChips([]);
+      setPending(true);
+      setError(null);
+      if (opts.reset) setTurn(null);
 
-  /** A new search clears the previous conversation — answers must not leak across it. */
-  const startConversation = useCallback(
-    (text: string) => {
-      setMessage(text);
-      setAnswered([]);
-      setTrail([]);
-      void run(text, []);
+      try {
+        const response = await fetch("/api/agent/shop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: trimmed,
+            answered: priorAnswered,
+            skipQuestions: opts.skipQuestions ?? false,
+            history: priorHistory,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          setError(data.error ?? "The agent could not complete that request.");
+          setTurn(null);
+          return;
+        }
+
+        const dto = data as TurnDto;
+        setTurn(dto);
+
+        const nextHistory = [...priorHistory, { role: "shopper" as const, content: trimmed }];
+
+        if (dto.outcome === "asking" && dto.question) {
+          setMessages((m) =>
+            m.concat({
+              role: "agent",
+              content: dto.question!.question,
+              note: dto.question!.rationale || undefined,
+            }),
+          );
+          setChips(dto.question.options);
+          setAnswered([...priorAnswered, dto.question.id]);
+          setHistory([...nextHistory, { role: "agent", content: dto.question.question }]);
+          return;
+        }
+
+        setHistory(nextHistory);
+        setAnswered(priorAnswered);
+        setMessages((m) =>
+          m.concat({
+            role: "results",
+            content:
+              dto.outcome === "results"
+                ? dto.narrative || "Here is what I found."
+                : dto.message || "I could not find anything matching that.",
+          }),
+        );
+      } catch {
+        setError("Could not reach the shopping agent. Check that the server is running.");
+      } finally {
+        setPending(false);
+      }
     },
-    [run],
+    [answered, history],
   );
 
-  const answerQuestion = useCallback(
-    (slotId: string, value: string) => {
-      const label = turn?.question?.question ?? "";
-      const next = applyAnswer(message, slotId as SlotId, value);
-      const nextAnswered = [...answered, slotId];
-      setMessage(next);
-      setAnswered(nextAnswered);
-      setTrail((t) => [...t, { question: label, answer: value }]);
-      void run(next, nextAnswered);
+  /** A brand-new search: previous answers must not leak into it. */
+  const startConversation = useCallback(
+    (text: string) => {
+      setMessages([]);
+      setHistory([]);
+      setAnswered([]);
+      setChips([]);
+      void send(text, { reset: true });
     },
-    [answered, message, run, turn],
+    [send],
   );
 
   const skipAllQuestions = useCallback(() => {
-    void run(message, answered, true);
-  }, [answered, message, run]);
+    void send("just show me the options", { skipQuestions: true });
+  }, [send]);
 
   // A search handed over from the sidebar runs once on arrival.
   const ranInitial = useRef(false);
@@ -141,102 +181,52 @@ export function ShoppingAgent({
             </p>
           </div>
 
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              startConversation(query);
-            }}
-            className="flex gap-2"
-          >
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Find me black running shoes, size 10, under ₹5,000"
-              aria-label="What are you looking for?"
-              disabled={pending}
-            />
-            <Button type="submit" disabled={pending || query.trim().length < 2}>
-              {pending ? "Searching…" : "Search"}
-            </Button>
-          </form>
-
           <div className="flex flex-wrap gap-1.5">
             {EXAMPLES.map((example) => (
               <button
                 key={example}
                 type="button"
                 disabled={pending}
-                onClick={() => {
-                  setQuery(example);
-                  startConversation(example);
-                }}
+                onClick={() => startConversation(example)}
                 className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
               >
                 {example}
               </button>
             ))}
           </div>
-
-          {degraded ? (
-            <p className="text-xs text-subtle">
-              No AI provider configured — running on deterministic rules. Ranking and
-              explanations still work; the wording is templated.
-            </p>
-          ) : null}
         </CardBody>
       </Card>
 
       {error ? <Alert tone="danger" title="Request failed">{error}</Alert> : null}
-      {pending ? <AgentProgress /> : null}
-      {turn && !pending && turn.outcome === "asking" ? (
-        <div className="space-y-3">
-          <ConversationTrail entries={trail} />
-          <ClarifyPanel
-            turn={turn}
-            pending={pending}
-            onAnswer={answerQuestion}
-            onSkipAll={skipAllQuestions}
-          />
-        </div>
-      ) : null}
 
-      {turn && !pending && turn.outcome !== "asking" ? (
-        <div className="space-y-3">
-          <ConversationTrail entries={trail} />
-          <TurnView turn={turn} />
-        </div>
-      ) : null}
+      <ChatPanel
+        messages={messages}
+        chips={chips}
+        pending={pending}
+        degraded={degraded || Boolean(turn?.provenance?.degraded)}
+        placeholder={
+          messages.length === 0
+            ? "e.g. I want shoes"
+            : "Answer, or say anything else — I read the whole conversation"
+        }
+        onSend={(text) => void send(text)}
+        onSkip={skipAllQuestions}
+        onReset={() => {
+          setMessages([]);
+          setHistory([]);
+          setAnswered([]);
+          setChips([]);
+          setTurn(null);
+          setError(null);
+        }}
+      >
+        {turn && turn.outcome !== "asking" ? <TurnView turn={turn} /> : null}
+      </ChatPanel>
 
-      {!turn && !pending && !error ? (
-        <FeaturedGrid
-          products={featured}
-          onPick={(title) => {
-            setQuery(title);
-            void run(title);
-          }}
-        />
+      {messages.length === 0 && !pending && !error ? (
+        <FeaturedGrid products={featured} onPick={(title) => startConversation(title)} />
       ) : null}
     </div>
-  );
-}
-
-/** Names the real pipeline stages rather than showing an opaque spinner. */
-function AgentProgress() {
-  const steps = ["Understanding your request", "Searching merchant catalogs", "Ranking options", "Explaining the choice"];
-  return (
-    <Card>
-      <CardBody className="space-y-2">
-        {steps.map((step, index) => (
-          <div key={step} className="flex items-center gap-2.5 text-sm text-muted-foreground">
-            <span
-              className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"
-              style={{ animationDelay: `${index * 160}ms` }}
-            />
-            {step}
-          </div>
-        ))}
-      </CardBody>
-    </Card>
   );
 }
 

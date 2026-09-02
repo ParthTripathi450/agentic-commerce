@@ -199,15 +199,30 @@ The writer owns validation, SKU reservation, inventory and re-indexing; the acti
 auth, parsing and redirects only. `deriveSearchTags()` gives the manual path deterministic tags
 with **no LLM call**, so that form keeps working when the model is rate-limited.
 
-### Conversational shopping (`server/agents/customer/clarify.ts`)
-An **ASK** step runs before SEARCH. When a request is too broad to rank honestly ("I want shoes"),
-the agent asks instead of guessing — purpose, then size, then colour, capped at `MAX_QUESTIONS = 3`.
-**Rules decide which slot is missing and what the options are; the model only phrases things**
-(§8.8). Options are catalogue-derived, so the agent can only ask about what it can search on. A
-skipped answer stays NULL — silence never becomes a filter. Answers are folded back into the
-shopper's own message and re-parsed by the SAME intent parser, so chips and free text cannot drift.
+### Conversational shopping (`server/agents/customer/conversation.ts`)
+The shop page is a **chat transcript**, not a search box. One LLM call per turn reads the WHOLE
+conversation and returns: what it understood (slots, `null` for anything unstated), whether it can
+search honestly yet, and the next question **in its own words**. There is no keyword matching on
+replies — "something for pounding pavement at weekends" and "road running" land in the same place
+because the model understood them.
 
-### Group checkout (`server/commerce/group-checkout.ts`)
+Split of responsibility:
+- **Understanding is the model's.** Extracting purpose/size/colour/budget from natural language,
+  judging what is missing, phrasing the question, and writing the semantic `searchPhrase`.
+- **Deciding is bounded.** `MAX_TURNS` is enforced in code, not left to the model; an unstated slot
+  must come back `null`; colour/size suggestions are intersected with live variant axes.
+- **`category` is never set from understanding** — §8.8 stated precisely: the bug was not "the model
+  misunderstood", it was "a guessed category became a hard filter". Purpose reaches retrieval
+  through the semantic phrase; only what the shopper actually stated becomes a filter.
+
+This call **replaces** `parseIntent` on the happy path — it already extracts everything that step
+did, and two calls per turn doubled free-tier token burn for no extra information. `clarify.ts` and
+`parseIntentWithRules` survive only as the no-LLM fallback (§9), which is why that fallback intent
+is rule-parsed rather than empty.
+
+**Autonomous mode passes `skipQuestions: true`** — nobody is at the keyboard to answer.
+
+### Group checkout### Group checkout (`server/commerce/group-checkout.ts`)
 One payment across merchants. Carts stay per-merchant because fulfilment, returns and the AP2 Cart
 Mandate all are — a merchant can only sign for their own basket. The group is the **settlement**
 unit: N Cart Mandates, N orders, **ONE** gateway order, and one payment row per order sharing its
@@ -301,6 +316,15 @@ never silently dropped from a combined total.
 18. **A gateway order can cover several payments.** Group checkout settles N orders against one
     gateway order, so any lookup by `gatewayOrderId` must handle a LIST — taking the first row
     leaves every other merchant's order stuck in `pending_payment` while the money has moved.
+19. **Groq's free tier caps tokens PER DAY PER MODEL** (200k on `gpt-oss-120b`), and reasoning
+    models burn them fast. `GROQ_FAST_MODEL` (default `openai/gpt-oss-20b`) serves the
+    `parse_intent` task, which fires on every conversational turn — fewer tokens *and* a separate
+    daily pool, so one exhausted model no longer takes the whole agent down. A 429 surfaces as
+    `provider: "deterministic-fallback"`; `LlmResult.attempts` carries the real reason.
+20. **Validate model output leniently — TRUNCATE, do not reject.** A hard `z.string().max(120)`
+    threw away an entire good understanding because the model wrote a chatty `productType`, and the
+    turn silently fell back to pattern matching with no error anywhere. Caps on model text are
+    sanity bounds, not correctness requirements.
 
 
 

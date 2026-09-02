@@ -1,9 +1,16 @@
 import { formatMoney } from "@/lib/money";
 import { hybridSearch, type SearchResult, type StructuredQuery } from "@/server/catalog/search";
 import { record, recordAndAdvance, startSession } from "@/server/audit/recorder";
-import { nextQuestion, describeKnown, type Slot, type SlotId } from "./clarify";
+import { describeKnown, type SlotId } from "./clarify";
+import {
+  intentFromUnderstanding,
+  understandConversation,
+  type ConversationTurn,
+} from "./conversation";
+import { parseIntentWithRules } from "./intent-rules";
+import { getVocabulary } from "@/server/catalog/vocabulary";
 import { explainSelection, type Explanation } from "./explain";
-import { intentToQuery, parseIntent } from "./intent";
+import { intentToQuery } from "./intent";
 import type { ShoppingIntent } from "./intent-schema";
 import { rankCandidates, type RankingResult } from "./ranker";
 
@@ -37,10 +44,17 @@ export type ShoppingTurn = {
   /**
    * The question the agent wants answered before it searches.
    *
-   * Present only when `outcome === "asking"`. Chosen by rules in `clarify.ts`,
-   * never by the model — see the note there.
+   * Present only when `outcome === "asking"`. Written by the model from the
+   * whole transcript — see `conversation.ts`. `options` are tappable answers,
+   * grounded against the live catalogue so tapping one always leads somewhere.
    */
-  question: Slot | null;
+  question: {
+    id: string;
+    question: string;
+    rationale: string;
+    skippable: boolean;
+    options: { label: string; value: string }[];
+  } | null;
   /** Slots answered so far, so the next turn does not repeat itself. */
   answered: SlotId[];
   /** What the agent currently believes, so the shopper can correct it. */
@@ -135,6 +149,13 @@ export async function runShoppingTurn(input: {
   limit?: number;
   /** Slots the shopper has already answered in this conversation. */
   answered?: SlotId[];
+  /**
+   * The conversation so far, oldest first, excluding the current message.
+   *
+   * The model reads all of it, which is what lets a later reply reinterpret an
+   * earlier one ("actually make that wide fit") instead of only appending.
+   */
+  history?: ConversationTurn[];
   /** Set when the shopper explicitly asked to stop being questioned. */
   skipQuestions?: boolean;
 }): Promise<ShoppingTurn> {
@@ -150,7 +171,40 @@ export async function runShoppingTurn(input: {
 
   // ---------------------------------------------------------- UNDERSTAND
   const understandStartedAt = Date.now();
-  const { intent, meta: intentMeta, degraded } = await parseIntent(input.message);
+  /*
+   * ONE understanding call per turn.
+   *
+   * `parseIntent` is no longer called on the happy path — the conversation
+   * model already extracts everything it produced, and a second call per turn
+   * doubled the rate-limit pressure on a free tier for no extra information.
+   * It survives only as the deterministic fallback source below.
+   */
+  const turns: ConversationTurn[] = [
+    ...(input.history ?? []),
+    { role: "shopper", content: input.message },
+  ];
+  const shopperText = turns
+    .filter((t) => t.role === "shopper")
+    .map((t) => t.content)
+    .join(", ");
+
+  /*
+   * The fallback intent is parsed by the RULES, not left empty.
+   *
+   * It is only used when no LLM is reachable, but it must still be as capable
+   * as the old deterministic path: an empty shell made the fallback think
+   * nothing was known, so a fully specified request ("black running shoes, size
+   * 10, under ₹5,000") got interrogated instead of searched.
+   */
+  const understanding = await understandConversation({
+    turns,
+    askedSlots: answered,
+    fallbackIntent: parseIntentWithRules(shopperText || input.message, await getVocabulary()),
+  });
+
+  const intent = intentFromUnderstanding(understanding, shopperText);
+  const degraded = understanding.degraded;
+  const intentMeta = understanding.meta;
 
   await recordAndAdvance(
     sessionId,
@@ -161,10 +215,10 @@ export async function runShoppingTurn(input: {
         inputs: { message: input.message },
       },
       reasoning: {
-        summary: "Mapped the request onto the catalog's real vocabulary.",
+        summary: understanding.understanding || "Understood the request from the conversation.",
         narrative: describeIntent(intent),
       },
-      action: { type: "parse_intent", params: { intent } },
+      action: { type: "understand_conversation", params: { slots: understanding.slots } },
       outcome: {
         status: "ok",
         latencyMs: Date.now() - understandStartedAt,
@@ -204,42 +258,48 @@ export async function runShoppingTurn(input: {
 
   // ------------------------------------------------------------------ ASK
   //
-  // Before searching: is the request specific enough to rank honestly? A bare
-  // "shoes" matches most of the catalogue, so ranking it would be arbitrary
-  // dressed as advice. Ask instead — and ask only about slots the RULES say
-  // are missing, so the agent cannot invent a constraint.
-  if (!input.skipQuestions) {
-    const decision = nextQuestion(intent, answered);
-    if (decision.ask) {
-      await record(sessionId, {
-        step: "SEARCH",
-        observation: {
-          summary: `Search deferred — "${intent.productQuery}" is too broad to rank honestly.`,
-          inputs: { productQuery: intent.productQuery, answered },
-        },
-        reasoning: {
-          summary: `Asking about ${decision.slot.id} rather than guessing it.`,
-          narrative: decision.slot.rationale,
-        },
-        action: { type: "ask_question", params: { slot: decision.slot.id } },
-        outcome: { status: "blocked", detail: decision.slot.question },
-      });
+  // The model already read the whole conversation above. If it still does not
+  // know enough to rank honestly, it asks — in its own words, about whatever it
+  // judged most useful. No keyword matching on the reply: "something for
+  // pounding pavement" and "road running" land in the same place because it
+  // understood them, not because either matched a pattern.
+  //
+  // What stays ours: the question CEILING (in `conversation.ts`), and the rule
+  // that an unstated slot comes back null rather than guessed.
+  if (!input.skipQuestions && !understanding.readyToSearch && understanding.question) {
+    await record(sessionId, {
+      step: "SEARCH",
+      observation: {
+        summary: `Search deferred — asking about ${understanding.questionAbout ?? "a missing detail"}.`,
+        inputs: { slots: understanding.slots },
+      },
+      reasoning: {
+        summary: understanding.understanding || "Not enough understood to rank honestly yet.",
+      },
+      action: { type: "ask_question", params: { about: understanding.questionAbout } },
+      outcome: { status: "blocked", detail: understanding.question },
+    });
 
-      return {
-        sessionId,
-        intent,
-        ranking: { ranked: [], weights: {} as never, priority: intent.priority, rejectedAlternatives: [] },
-        explanation: null,
-        stats: { recalled: 0, considered: 0, accepted: 0, merchantsSearched: 0, durationMs: 0, topRelevance: 0 },
-        relaxations: [],
-        outcome: "asking",
-        message: decision.slot.question,
-        question: decision.slot,
-        answered,
-        known: describeKnown(intent),
-        degraded,
-      };
-    }
+    return {
+      sessionId,
+      intent,
+      ranking: { ranked: [], weights: {} as never, priority: intent.priority, rejectedAlternatives: [] },
+      explanation: null,
+      stats: { recalled: 0, considered: 0, accepted: 0, merchantsSearched: 0, durationMs: 0, topRelevance: 0 },
+      relaxations: [],
+      outcome: "asking",
+      message: understanding.question,
+      question: {
+        id: understanding.questionAbout ?? `turn-${answered.length}`,
+        question: understanding.question,
+        rationale: understanding.understanding,
+        skippable: true,
+        options: understanding.suggestions.map((label) => ({ label, value: label })),
+      },
+      answered,
+      known: understandingSummary(understanding.slots),
+      degraded,
+    };
   }
 
   // --------------------------------------------------------------- SEARCH
@@ -401,6 +461,26 @@ export async function runShoppingTurn(input: {
     known: describeKnown(intent),
     degraded: degraded || explanation.meta.degraded,
   };
+}
+
+/**
+ * What the agent believes, in the shopper's terms.
+ *
+ * Built from the understood slots rather than the parsed filters, so the
+ * shopper sees what was heard and can correct it before anything is searched.
+ */
+function understandingSummary(slots: Record<string, unknown>): string[] {
+  const labels: Record<string, string> = {
+    productType: "", purpose: "", size: "size", color: "", brand: "",
+    width: "", gender: "", budgetMax: "under ₹", budgetMin: "over ₹", quantity: "qty",
+  };
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(slots)) {
+    if (value === null || value === undefined || value === "") continue;
+    const prefix = labels[key] ?? "";
+    out.push(prefix ? `${prefix}${prefix.endsWith("₹") ? "" : " "}${value}` : String(value));
+  }
+  return out;
 }
 
 function describeIntent(intent: ShoppingIntent): string {

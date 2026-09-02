@@ -26,6 +26,14 @@ const schema = z.object({
 
   // Model ids are overridable: provider catalogues change faster than code.
   GROQ_MODEL: z.string().default("openai/gpt-oss-120b"),
+  /*
+   * Lighter model for high-frequency conversational turns.
+   *
+   * Groq's free tier caps tokens PER DAY PER MODEL, so routing the chattiest
+   * task to a second model both burns fewer tokens and draws from a separate
+   * daily pool — one exhausted model no longer takes the whole agent down.
+   */
+  GROQ_FAST_MODEL: z.string().default("openai/gpt-oss-20b"),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
   OPENROUTER_MODEL: z.string().default("meta-llama/llama-3.3-70b-instruct:free"),
   CEREBRAS_MODEL: z.string().default("llama-3.3-70b"),

@@ -8,15 +8,23 @@ import { toTurnDto } from "@/server/agents/customer/dto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SLOT_IDS = ["purpose", "size", "color", "budget", "width", "gender"] as const;
-
 const bodySchema = z.object({
-  message: z.string().min(2, "Say what you are looking for").max(500),
+  message: z.string().min(1, "Say what you are looking for").max(500),
   sessionId: z.string().max(36).optional(),
-  /** Slots already answered this conversation, so the agent does not repeat itself. */
-  answered: z.array(z.enum(SLOT_IDS)).max(8).default([]),
+  /** Topics already covered, so the agent is told not to revisit them. */
+  answered: z.array(z.string().max(40)).max(12).default([]),
   /** Set when the shopper asks to see results without further questions. */
   skipQuestions: z.boolean().default(false),
+  /** The conversation so far, oldest first, excluding `message`. */
+  history: z
+    .array(
+      z.object({
+        role: z.enum(["shopper", "agent"]),
+        content: z.string().max(1000),
+      }),
+    )
+    .max(24)
+    .default([]),
 });
 
 export async function POST(request: Request) {
@@ -45,8 +53,9 @@ export async function POST(request: Request) {
       userId: session.user.id,
       message: parsed.data.message,
       sessionId: parsed.data.sessionId,
-      answered: parsed.data.answered,
+      answered: parsed.data.answered as never,
       skipQuestions: parsed.data.skipQuestions,
+      history: parsed.data.history,
     });
     return NextResponse.json(toTurnDto(turn));
   } catch (cause) {

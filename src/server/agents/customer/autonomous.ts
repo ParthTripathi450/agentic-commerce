@@ -65,10 +65,18 @@ export async function runAutonomousPurchase(input: {
   quantity?: number;
 }): Promise<AutonomousOutcome> {
   // Steps 1-4: the same audited pipeline the assisted flow uses.
+  /*
+   * Autonomous mode never asks.
+   *
+   * "Let the agent buy it for me" is a single instruction, not a conversation —
+   * there is nobody at the keyboard to answer a clarifying question. It either
+   * understands enough to choose, or it stops at the gate and says why.
+   */
   const turn = await runShoppingTurn({
     userId: input.userId,
     message: input.message,
     limit: 5,
+    skipQuestions: true,
   });
 
   if (turn.outcome === "needs_clarification") {

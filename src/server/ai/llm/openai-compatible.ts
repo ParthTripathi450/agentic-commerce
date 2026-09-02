@@ -12,6 +12,8 @@ export function createOpenAiCompatibleProvider(config: {
   baseUrl: string;
   apiKey: () => string | undefined;
   model: () => string;
+  /** Optional cheaper model for high-frequency tasks. */
+  fastModel?: () => string;
   rpm: number;
   requiresKey?: boolean;
   /** Extra gate beyond credentials. Used to keep local inference opt-in. */
@@ -32,15 +34,26 @@ export function createOpenAiCompatibleProvider(config: {
         ...options.messages,
       ];
 
+      /*
+       * Conversational turns run on the lighter model when one is configured.
+       *
+       * `parse_intent` fires on every message the shopper sends, so it is by
+       * far the heaviest consumer. Free tiers cap tokens per day PER MODEL, so
+       * splitting it off both costs fewer tokens and means an exhausted model
+       * no longer takes the whole agent down with it.
+       */
+      const model =
+        options.task === "parse_intent" && config.fastModel ? config.fastModel() : config.model();
+
       const body: Record<string, unknown> = {
-        model: config.model(),
+        model,
         messages,
         temperature: options.temperature ?? 0.2,
         max_tokens: options.maxTokens ?? 900,
       };
       if (options.json) body.response_format = { type: "json_object" };
       // Only reasoning models accept this; others 400 on an unknown field.
-      if (options.reasoningEffort && /gpt-oss|^o[134]|reasoning/i.test(config.model())) {
+      if (options.reasoningEffort && /gpt-oss|^o[134]|reasoning/i.test(model)) {
         body.reasoning_effort = options.reasoningEffort;
       }
 
@@ -98,7 +111,7 @@ export function createOpenAiCompatibleProvider(config: {
       return {
         text,
         provider: config.name,
-        model: config.model(),
+        model,
         tokensIn: payload.usage?.prompt_tokens,
         tokensOut: payload.usage?.completion_tokens,
         latencyMs: Date.now() - startedAt,
@@ -113,6 +126,7 @@ export const groqProvider = () =>
     baseUrl: "https://api.groq.com/openai/v1",
     apiKey: () => env().GROQ_API_KEY,
     model: () => env().GROQ_MODEL,
+    fastModel: () => env().GROQ_FAST_MODEL,
     rpm: 30,
   });
 

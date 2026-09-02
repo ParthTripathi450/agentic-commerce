@@ -3,7 +3,7 @@
 Read `NOTES.md` first for architecture and conventions. This file is the state snapshot.
 
 **Last updated:** 2026-09-02
-**Health:** 175 tests passing (22 files) · 0 lint issues · production build clean ·
+**Health:** 182 tests passing (23 files) · 0 lint issues · production build clean ·
 38 route files · 32 tables
 **Git:** pushed to `origin/main`
 **Repo:** https://github.com/ParthTripathi450/agentic-commerce-platform (private)
@@ -140,6 +140,31 @@ the same "already committed today" figure, so three baskets that each fit the he
 it together — splitting across merchants would have been a way past a daily limit. The combined
 total is now re-checked. Baskets that cannot be included are returned in `excluded` and displayed.
 Webhooks now settle every payment sharing a gateway order, not just the first.
+
+### NLP conversation, replacing pattern matching (this session, after feedback)
+The shop page is now a **chat transcript** in a much larger container (34rem, 42rem on desktop):
+agent bubble left, shopper right, chips under the newest question, free text always live.
+`server/agents/customer/conversation.ts` makes ONE LLM call per turn over the whole transcript and
+returns understood slots (null when unstated), whether it can search, and the next question in its
+own words. Verified: *"something for pounding the pavement on weekends, building up to a half
+marathon"* → searched for *"running shoes size 9 for training towards half marathon"*.
+
+It **replaced** `parseIntent` on the happy path — keeping both was three LLM calls per turn and
+doubled token burn. `clarify.ts` / `parseIntentWithRules` remain as the no-LLM fallback only.
+
+Three bugs found while building it:
+1. **Strict `.max()` on model output** threw away a whole good understanding because
+   `productType` ran long, silently falling back to pattern matching with no error. Now truncates.
+2. **The fallback intent was an empty shell** after `parseIntent` was removed, so the no-LLM path
+   thought nothing was known and interrogated a fully specified request. Now rule-parsed.
+3. **Autonomous mode was being interrupted by clarifying questions** — there is nobody at the
+   keyboard to answer. It now passes `skipQuestions: true`.
+
+**Free-tier token budget.** Groq caps tokens per day PER MODEL (200k on `gpt-oss-120b`) and that
+cap was hit during testing. `GROQ_FAST_MODEL=openai/gpt-oss-20b` now serves conversational turns:
+fewer tokens and a separate daily pool. Groq's catalogue had rotated again (§8.6) — no
+`llama-3.1-8b-instant`; `gpt-oss-20b` and `qwen3.x-27b` are what is available.
+**Groq is the only configured provider — a `GEMINI_API_KEY` would give real failover.**
 
 ### Payment choice + visible agent workflow (feature 2)
 At checkout the shopper picks **"I'll pay myself"** (the genuine Razorpay window) or **"Let the
