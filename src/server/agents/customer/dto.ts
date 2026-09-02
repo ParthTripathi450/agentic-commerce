@@ -1,5 +1,8 @@
 import type { Criterion } from "@/lib/agent-types";
 import type { ShoppingTurn } from "./agent";
+import type { RankingResult } from "./ranker";
+
+type RankedItem = RankingResult["ranked"][number];
 
 /**
  * Wire format for a shopping turn.
@@ -33,7 +36,7 @@ export type OptionDto = {
 
 export type TurnDto = {
   sessionId: string;
-  outcome: "results" | "no_results" | "needs_clarification" | "asking";
+  outcome: "results" | "no_results" | "needs_clarification" | "asking" | "alternatives";
   message: string | null;
   /**
    * The question the agent is waiting on, when `outcome === "asking"`.
@@ -52,6 +55,18 @@ export type TurnDto = {
   answered: string[];
   /** What the agent believes so far, so the shopper can correct it. */
   known: string[];
+  /**
+   * Buyable near-misses, when the exact request could not be filled.
+   *
+   * Each carries the ways it differs, so the UI can never present a substitute
+   * as a match.
+   */
+  alternatives: {
+    option: OptionDto;
+    differences: string[];
+  }[];
+  /** Constraints set aside to find them. */
+  alternativesDropped: string[];
   narrative: string | null;
   /** Short scannable reasons, generated from the score vector. */
   points: string[];
@@ -77,6 +92,46 @@ export type TurnDto = {
   };
   provenance: { provider: string; model: string; degraded: boolean };
 };
+
+/**
+ * Projects a candidate onto the wire shape.
+ *
+ * Shared by ranked results and alternatives so a substitute card can never
+ * drift from a result card — they are the same product, differently framed.
+ */
+function toOption(item: {
+  candidate: RankedItem["candidate"];
+  rank: number;
+  score: number;
+  criteria: Criterion[];
+}): OptionDto {
+  return {
+    rank: item.rank,
+    productId: item.candidate.productId,
+    variantId: item.candidate.variant.id,
+    title: item.candidate.title,
+    brand: item.candidate.brand,
+    category: item.candidate.category,
+    merchant: {
+      id: item.candidate.merchant.id,
+      slug: item.candidate.merchant.slug,
+      name: item.candidate.merchant.name,
+    },
+    priceMinor: item.candidate.variant.priceMinor,
+    compareAtPriceMinor: item.candidate.variant.compareAtPriceMinor,
+    currency: item.candidate.variant.currency,
+    variantAttributes: item.candidate.variant.attributes,
+    availableQuantity: item.candidate.variant.availableQuantity,
+    deliveryDays: item.candidate.policies.standardDeliveryDays,
+    returnWindowDays: item.candidate.policies.returnWindowDays,
+    returnsAccepted: item.candidate.policies.returnsAccepted,
+    ratingBp: item.candidate.ratingBp,
+    ratingCount: item.candidate.ratingCount,
+    imageUrl: item.candidate.imageUrls[0] ?? null,
+    score: item.score,
+    criteria: item.criteria,
+  };
+}
 
 export function toTurnDto(turn: ShoppingTurn): TurnDto {
   return {
@@ -104,32 +159,12 @@ export function toTurnDto(turn: ShoppingTurn): TurnDto {
       priority: turn.intent.priority,
       quantity: turn.intent.quantity,
     },
-    options: turn.ranking.ranked.map((item) => ({
-      rank: item.rank,
-      productId: item.candidate.productId,
-      variantId: item.candidate.variant.id,
-      title: item.candidate.title,
-      brand: item.candidate.brand,
-      category: item.candidate.category,
-      merchant: {
-        id: item.candidate.merchant.id,
-        slug: item.candidate.merchant.slug,
-        name: item.candidate.merchant.name,
-      },
-      priceMinor: item.candidate.variant.priceMinor,
-      compareAtPriceMinor: item.candidate.variant.compareAtPriceMinor,
-      currency: item.candidate.variant.currency,
-      variantAttributes: item.candidate.variant.attributes,
-      availableQuantity: item.candidate.variant.availableQuantity,
-      deliveryDays: item.candidate.policies.standardDeliveryDays,
-      returnWindowDays: item.candidate.policies.returnWindowDays,
-      returnsAccepted: item.candidate.policies.returnsAccepted,
-      ratingBp: item.candidate.ratingBp,
-      ratingCount: item.candidate.ratingCount,
-      imageUrl: item.candidate.imageUrls[0] ?? null,
-      score: item.score,
-      criteria: item.criteria,
+    options: turn.ranking.ranked.map(toOption),
+    alternatives: turn.alternatives.map((a) => ({
+      option: toOption({ candidate: a.candidate, rank: 0, score: 0, criteria: [] }),
+      differences: a.differences,
     })),
+    alternativesDropped: turn.alternativesDropped,
     comparisons:
       turn.explanation?.comparisons.map((c) => ({
         rank: c.rank,

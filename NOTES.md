@@ -228,6 +228,32 @@ is rule-parsed rather than empty.
 
 **Autonomous mode passes `skipQuestions: true`** — nobody is at the keyboard to answer.
 
+### Selling a substitute (`server/agents/customer/alternatives.ts`)
+**The agent's job is to sell**, so an empty result is a lost sale — but only one kind of empty
+result may be recovered:
+
+| | |
+|---|---|
+| `noRelevantMatch = true` | Catalogue does not stock this KIND of thing ("a gaming laptop"). **No alternatives** — offering shoes is the hallucination §6 exists to prevent. |
+| `noRelevantMatch = false` | We stock it; a hard filter removed every option ("size 15", "purple formal shoes"). **Alternatives belong here.** |
+
+Alternatives are never presented as matches: each carries `differences[]` stating exactly how it
+differs ("no size 15 — available in 7, 8, 9, 10, 11"). Availability claims are **queried from live
+variants**, not read off `candidate.variant` — that is one variant, so a list built from it would be
+true of no individual product. Stock is never relaxed: an unbuyable alternative is not an
+alternative.
+
+### Suggestion chips (`server/catalog/facets.ts`)
+Chips are a promise — tapping "Black" must lead to black shoes buyable today. `computeFacets()`
+counts live variants joined to live inventory, scoped to the products the search recalled (so
+"100ml" is never offered as a shoe size). **Price bands are quartiles of the real distribution**,
+never hardcoded: fixed bands either bunch everything into one bucket or offer empty ones. Every band
+shown contains stock. **Budget is always asked, and asked last** — a price band is the most useful
+thing a shopper can tap, and asking last means the bands are computed from products they might
+actually buy. Two deterministic guards sit over the model: a repeated question is caught and
+redirected, and a chip row is never rendered empty (`optionsForSlot` fills gaps for purpose/gender,
+which are needs rather than countable attributes).
+
 ### Group checkout### Group checkout (`server/commerce/group-checkout.ts`)
 One payment across merchants. Carts stay per-merchant because fulfilment, returns and the AP2 Cart
 Mandate all are — a merchant can only sign for their own basket. The group is the **settlement**

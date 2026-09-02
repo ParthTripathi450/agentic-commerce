@@ -3,7 +3,7 @@
 Read `NOTES.md` first for architecture and conventions. This file is the state snapshot.
 
 **Last updated:** 2026-09-02
-**Health:** 182 tests passing (23 files) · 0 lint issues · production build clean ·
+**Health:** 203 tests passing (25 files) · 0 lint issues · production build clean ·
 38 route files · 32 tables
 **Git:** pushed to `origin/main`
 **Repo:** https://github.com/ParthTripathi450/agentic-commerce-platform (private)
@@ -168,6 +168,23 @@ cap was hit during testing. `GROQ_FAST_MODEL=openai/gpt-oss-20b` now serves conv
 fewer tokens and a separate daily pool. Groq's catalogue had rotated again (§8.6) — no
 `llama-3.1-8b-instant`; `gpt-oss-20b` and `qwen3.x-27b` are what is available.
 **Groq is the only configured provider — a `GEMINI_API_KEY` would give real failover.**
+
+### Selling substitutes, and stock-backed suggestion chips
+**The agent's aim is to sell**, so "no results" is now only for things the marketplace genuinely
+does not stock. When the catalogue has the kind of product but a filter blocked every option, it
+offers the closest **buyable** alternatives, each labelled with how it differs:
+- *"size 15 running shoes"* → Velocity Run 3 · **"no size 15 — available in 7, 8, 9, 10, 11"**
+- *"purple formal shoes"* → Vantor Office Flex · **"no color purple — available in black, brown"**
+- *"gaming laptop"* → still refuses. `noRelevantMatch` is the line, and it holds.
+
+Availability claims are queried from live variants, because `candidate.variant` is a single variant
+and a list built from it would be true of no individual product.
+
+**Chips are now backed by live stock** (`server/catalog/facets.ts`): colours, sizes and price bands
+counted from variants joined to inventory, scoped to the recalled products. Price bands are
+quartiles of the real distribution — running shoes and football boots get different bands, and every
+band contains stock. **Budget is always asked, last.** Two guards over the model: repeated questions
+are caught and redirected to budget, and a chip row is never empty.
 
 ### Payment choice + visible agent workflow (feature 2)
 At checkout the shopper picks **"I'll pay myself"** (the genuine Razorpay window) or **"Let the

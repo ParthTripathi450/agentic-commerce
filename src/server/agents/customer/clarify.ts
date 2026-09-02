@@ -178,6 +178,37 @@ export function missingSlots(intent: ShoppingIntent): Slot[] {
   return slots;
 }
 
+/**
+ * Fallback chips for a question the catalogue has no facet for.
+ *
+ * Purpose, gender and fit describe a need rather than a countable attribute, so
+ * they cannot come from a facet query. A question with an empty chip row is
+ * worse than one with sensible defaults, so these fill that gap.
+ */
+export function optionsForSlot(id: string): SlotOption[] {
+  switch (id) {
+    case "purpose":
+      return FOOTWEAR_PURPOSES;
+    case "color":
+      return COLORS;
+    case "size":
+      return SHOE_SIZES;
+    case "budget":
+      return BUDGETS;
+    case "width":
+      return WIDTHS;
+    case "gender":
+      return [
+        { label: "Men's", value: "men" },
+        { label: "Women's", value: "women" },
+        { label: "Unisex", value: "unisex" },
+        { label: "Kids", value: "kids" },
+      ];
+    default:
+      return [];
+  }
+}
+
 /** Non-footwear still gets budget and colour, which every category supports. */
 function genericSlots(intent: ShoppingIntent): Slot[] {
   const slots: Slot[] = [];

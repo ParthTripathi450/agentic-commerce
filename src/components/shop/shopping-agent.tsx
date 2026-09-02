@@ -243,6 +243,41 @@ function AgentProgress() {
 function TurnView({ turn }: { turn: TurnDto }) {
   const [buying, setBuying] = useState<{ option: OptionDto; quantity: number } | null>(null);
 
+  /*
+   * The exact thing is unavailable, but we sell something close.
+   *
+   * Shown as substitutes, never as matches: every card leads with how it
+   * differs from what was asked, so the shopper is choosing knowingly.
+   */
+  if (turn.outcome === "alternatives") {
+    return (
+      <div className="space-y-4">
+        <Alert tone="warning" title="Not exactly what you asked for">
+          {turn.message}
+        </Alert>
+        <div className="space-y-4">
+          {turn.alternatives.map(({ option, differences }) => (
+            <div key={`${option.productId}-${option.variantId}`} className="space-y-2">
+              <ul className="flex flex-wrap gap-1.5">
+                {differences.map((d) => (
+                  <li key={d}>
+                    <Badge tone="warning">{d}</Badge>
+                  </li>
+                ))}
+              </ul>
+              <OptionCard
+                option={option}
+                intent={turn.intent}
+                selected={buying?.option.variantId === option.variantId}
+                onSelect={(quantity) => setBuying({ option, quantity })}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (turn.outcome !== "results") {
     return (
       <Alert tone={turn.outcome === "needs_clarification" ? "info" : "warning"}

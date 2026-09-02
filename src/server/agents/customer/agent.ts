@@ -1,7 +1,9 @@
 import { formatMoney } from "@/lib/money";
 import { hybridSearch, type SearchResult, type StructuredQuery } from "@/server/catalog/search";
 import { record, recordAndAdvance, startSession } from "@/server/audit/recorder";
-import { describeKnown, type SlotId } from "./clarify";
+import { findAlternatives, type Alternative } from "./alternatives";
+import { computeFacets, type PriceBucket } from "@/server/catalog/facets";
+import { describeKnown, optionsForSlot, type SlotId } from "./clarify";
 import {
   intentFromUnderstanding,
   understandConversation,
@@ -11,6 +13,7 @@ import { parseIntentWithRules } from "./intent-rules";
 import { getVocabulary } from "@/server/catalog/vocabulary";
 import { explainSelection, type Explanation } from "./explain";
 import { intentToQuery } from "./intent";
+import { MAX_TURNS } from "./conversation";
 import type { ShoppingIntent } from "./intent-schema";
 import { rankCandidates, type RankingResult } from "./ranker";
 
@@ -38,7 +41,7 @@ export type ShoppingTurn = {
   stats: SearchResult["stats"];
   /** Constraints the agent loosened, and what it loosened them to. */
   relaxations: Relaxation[];
-  outcome: "results" | "no_results" | "needs_clarification" | "asking";
+  outcome: "results" | "no_results" | "needs_clarification" | "asking" | "alternatives";
   /** Message shown to the shopper when there is nothing to rank. */
   message: string | null;
   /**
@@ -55,6 +58,15 @@ export type ShoppingTurn = {
     skippable: boolean;
     options: { label: string; value: string }[];
   } | null;
+  /**
+   * Buyable near-misses when the exact request could not be filled.
+   *
+   * Populated only when the catalogue stocks this KIND of thing — never when
+   * `noRelevantMatch` fired. Each carries how it differs from the request.
+   */
+  alternatives: Alternative[];
+  /** Constraints set aside to find those alternatives. */
+  alternativesDropped: string[];
   /** Slots answered so far, so the next turn does not repeat itself. */
   answered: SlotId[];
   /** What the agent currently believes, so the shopper can correct it. */
@@ -250,6 +262,8 @@ export async function runShoppingTurn(input: {
       outcome: "needs_clarification",
       message: intent.clarificationNeeded,
       question: null,
+      alternatives: [],
+      alternativesDropped: [],
       answered,
       known: describeKnown(intent),
       degraded,
@@ -266,18 +280,95 @@ export async function runShoppingTurn(input: {
   //
   // What stays ours: the question CEILING (in `conversation.ts`), and the rule
   // that an unstated slot comes back null rather than guessed.
-  if (!input.skipQuestions && !understanding.readyToSearch && understanding.question) {
+  /*
+   * Budget is always worth asking, and is asked LAST.
+   *
+   * A price band is the single most useful thing a shopper can tap: it needs no
+   * typing and it halves the result set. The model often skips it, so the rule
+   * adds it back rather than leaving it to chance — but only once everything
+   * else is known, so the bands can be computed from products they might
+   * actually buy rather than from the whole catalogue.
+   */
+  const budgetUnknown =
+    intent.priceMaxMinor === null &&
+    intent.priceMinMinor === null &&
+    !answered.includes("budget");
+
+  const shouldAskBudget =
+    !input.skipQuestions &&
+    budgetUnknown &&
+    understanding.readyToSearch &&
+    answered.length < MAX_TURNS;
+
+  /*
+   * The model sometimes re-asks a topic it was told was covered. Repeating a
+   * question is the fastest way to look broken, so the repeat is caught here
+   * rather than trusted to the prompt: fall through to budget if that is still
+   * unknown, otherwise stop asking and search.
+   */
+  const modelRepeatedItself =
+    understanding.questionAbout !== null &&
+    (answered as string[]).includes(understanding.questionAbout);
+
+  const askAnything =
+    !input.skipQuestions &&
+    (shouldAskBudget ||
+      (!understanding.readyToSearch &&
+        understanding.question !== null &&
+        (!modelRepeatedItself || budgetUnknown)));
+
+  if (askAnything) {
+    /*
+     * Chips are computed from LIVE stock, not from a static list.
+     *
+     * A suggestion is a promise: tapping "Black" has to lead to black shoes
+     * that can be bought today. The facet query runs over the products this
+     * search actually recalled, so a colour nobody stocks is never offered and
+     * a price band with nothing in it is never shown.
+     */
+    const facetQuery = intentToQuery(
+      { ...intent, attributes: {}, priceMaxMinor: null, priceMinMinor: null },
+      { excludeMerchantIds: input.excludeMerchantIds, limit: 60 },
+    );
+    const facetSearch = await hybridSearch(facetQuery);
+    const facets = await computeFacets(facetSearch.candidates.map((c) => c.productId));
+
+    /*
+     * The model sometimes re-asks a topic it was told was covered. Repeating a
+     * question is the fastest way to look broken, so the repeat is caught here
+     * rather than trusted to the prompt: fall through to budget if that is
+     * still unknown, otherwise stop asking and search.
+     */
+    const modelRepeatedItself =
+      !shouldAskBudget &&
+      understanding.questionAbout !== null &&
+      (answered as string[]).includes(understanding.questionAbout);
+
+
+    const askingAbout =
+      shouldAskBudget || (modelRepeatedItself && budgetUnknown)
+        ? "budget"
+        : (understanding.questionAbout ?? "");
+    const questionText = askingAbout === "budget"
+      ? facets.priceRange
+        ? `Last thing — what would you like to spend? These run from ${formatMoney(facets.priceRange.minMinor)} to ${formatMoney(facets.priceRange.maxMinor)}.`
+        : "Last thing — what would you like to spend?"
+      : understanding.question!;
+
+    const options = buildOptions(askingAbout, facets, understanding.suggestions);
+
     await record(sessionId, {
       step: "SEARCH",
       observation: {
-        summary: `Search deferred — asking about ${understanding.questionAbout ?? "a missing detail"}.`,
-        inputs: { slots: understanding.slots },
+        summary: `Search deferred — asking about ${askingAbout || "a missing detail"}.`,
+        inputs: { slots: understanding.slots, inStockVariants: facets.inStockVariants },
       },
       reasoning: {
         summary: understanding.understanding || "Not enough understood to rank honestly yet.",
+        narrative: `Offering ${options.length} suggestions, all backed by live stock.`,
       },
-      action: { type: "ask_question", params: { about: understanding.questionAbout } },
-      outcome: { status: "blocked", detail: understanding.question },
+      action: { type: "ask_question", params: { about: askingAbout } },
+      outcome: { status: "blocked", detail: questionText },
     });
 
     return {
@@ -288,14 +379,16 @@ export async function runShoppingTurn(input: {
       stats: { recalled: 0, considered: 0, accepted: 0, merchantsSearched: 0, durationMs: 0, topRelevance: 0 },
       relaxations: [],
       outcome: "asking",
-      message: understanding.question,
+      message: questionText,
       question: {
-        id: understanding.questionAbout ?? `turn-${answered.length}`,
-        question: understanding.question,
+        id: askingAbout || `turn-${answered.length}`,
+        question: questionText,
         rationale: understanding.understanding,
         skippable: true,
-        options: understanding.suggestions.map((label) => ({ label, value: label })),
+        options,
       },
+      alternatives: [],
+      alternativesDropped: [],
       answered,
       known: understandingSummary(understanding.slots),
       degraded,
@@ -355,6 +448,59 @@ export async function runShoppingTurn(input: {
   );
 
   if (search.candidates.length === 0) {
+    /*
+     * Before giving up: is this "we don't sell that" or "we sell it, but not in
+     * that colour"? The agent exists to sell, and the second case is a
+     * recoverable sale — but only if the substitute is labelled as one.
+     * `findAlternatives` refuses outright when `noRelevantMatch` fired.
+     */
+    const { alternatives, dropped } = await findAlternatives({
+      intent,
+      query,
+      search,
+      limit: 4,
+    });
+
+    if (alternatives.length > 0) {
+      const message =
+        `I could not find exactly that, so I set aside ${dropped.join(" and ")}. ` +
+        `Here is the closest I can actually sell you today — each one says how it differs.`;
+
+      await record(sessionId, {
+        step: "RANK",
+        observation: {
+          summary: `Exact request unavailable; offering ${alternatives.length} buyable near-misses.`,
+          inputs: { dropped },
+        },
+        reasoning: {
+          summary:
+            "The catalogue stocks this kind of product, so a substitute is useful rather than a guess.",
+          tradeoffs: alternatives
+            .map((a) => `${a.candidate.title}: ${a.differences.join("; ")}`)
+            .join(" | "),
+        },
+        action: { type: "offer_alternatives" },
+        outcome: { status: "ok", detail: message },
+      });
+
+      return {
+        sessionId,
+        intent,
+        ranking: { ranked: [], weights: {} as never, priority: intent.priority, rejectedAlternatives: [] },
+        explanation: null,
+        stats: search.stats,
+        relaxations,
+        outcome: "alternatives",
+        message,
+        question: null,
+        alternatives,
+        alternativesDropped: dropped,
+        answered,
+        known: describeKnown(intent),
+        degraded,
+      };
+    }
+
     const message = buildNoResultsMessage(intent, search);
     await record(sessionId, {
       step: "RANK",
@@ -380,6 +526,8 @@ export async function runShoppingTurn(input: {
       outcome: "no_results",
       message,
       question: null,
+      alternatives: [],
+      alternativesDropped: [],
       answered,
       known: describeKnown(intent),
       degraded,
@@ -457,6 +605,8 @@ export async function runShoppingTurn(input: {
     outcome: "results",
     message: null,
     question: null,
+    alternatives: [],
+    alternativesDropped: [],
     answered,
     known: describeKnown(intent),
     degraded: degraded || explanation.meta.degraded,
@@ -469,6 +619,46 @@ export async function runShoppingTurn(input: {
  * Built from the understood slots rather than the parsed filters, so the
  * shopper sees what was heard and can correct it before anything is searched.
  */
+/**
+ * Tappable answers for one question, every one backed by live stock.
+ *
+ * Falls back to the model's own suggestions only for questions the catalogue
+ * has no facet for (purpose, occasion) — those are ways of describing a need,
+ * not attributes we can count rows of.
+ */
+function buildOptions(
+  askingAbout: string,
+  facets: { attributes: Record<string, { value: string; label: string; count: number }[]>; priceBuckets: PriceBucket[] },
+  fromModel: string[],
+): { label: string; value: string }[] {
+  if (askingAbout === "budget") {
+    return [
+      ...facets.priceBuckets.map((b) => ({
+        label: b.label,
+        // Phrased as the shopper would say it, so it re-parses naturally.
+        value:
+          b.minMinor === null
+            ? `under ${Math.round((b.maxMinor ?? 0) / 100)}`
+            : b.maxMinor === null
+              ? `over ${Math.round(b.minMinor / 100)}`
+              : `between ${Math.round(b.minMinor / 100)} and ${Math.round(b.maxMinor / 100)}`,
+      })),
+      { label: "No limit", value: "no budget limit" },
+    ];
+  }
+
+  const facet = facets.attributes[askingAbout];
+  if (facet?.length) {
+    return facet.map((v) => ({ label: v.label, value: v.value }));
+  }
+
+  if (fromModel.length > 0) return fromModel.map((label) => ({ label, value: label }));
+
+  // Never render an empty chip row — it reads as a broken UI, and the whole
+  // point is that the shopper does not have to type.
+  return optionsForSlot(askingAbout);
+}
+
 function understandingSummary(slots: Record<string, unknown>): string[] {
   const labels: Record<string, string> = {
     productType: "", purpose: "", size: "size", color: "", brand: "",

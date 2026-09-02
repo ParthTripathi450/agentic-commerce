@@ -126,6 +126,31 @@ export function AutonomousFlow({
           return;
         }
 
+        /*
+         * The exact request cannot be filled, but we sell something close.
+         * Say so and offer it, rather than ending the conversation — that is
+         * the whole point of an agent whose job is to sell.
+         */
+        if (dto.outcome === "alternatives" && dto.alternatives.length > 0) {
+          const lines = dto.alternatives
+            .map((a) => `• ${a.option.title} — ${a.differences.join("; ")}`)
+            .join("\n");
+          setMessages((m) =>
+            m.concat({
+              role: "agent",
+              content: `${dto.message}\n\n${lines}\n\nWant me to go ahead with one of these, or shall we change something?`,
+            }),
+          );
+          setChips(
+            dto.alternatives.slice(0, 3).map((a) => ({
+              label: a.option.title,
+              value: `buy the ${a.option.title}`,
+            })),
+          );
+          setHistory([...nextHistory, { role: "agent", content: dto.message ?? "" }]);
+          return;
+        }
+
         // Understood enough — hand the synthesised instruction to the buyer.
         setHistory(nextHistory);
         const instruction =
