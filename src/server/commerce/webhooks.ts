@@ -28,6 +28,8 @@ type RazorpayEvent = {
   payload?: {
     payment?: { entity?: { id?: string; order_id?: string; status?: string; error_description?: string } };
     order?: { entity?: { id?: string } };
+    /** Refund events carry the payment entity too, so the order lookup still works. */
+    refund?: { entity?: { id?: string; amount?: number; status?: string } };
   };
 };
 
@@ -100,7 +102,7 @@ export async function handleRazorpayWebhook(
     return { status: "ignored", detail: "No order matches that payment." };
   }
 
-  const outcome = await applyEvent(event.event, order, payment, entity);
+  const outcome = await applyEvent(event.event, order, payment, entity, event.payload?.refund?.entity);
   await markProcessed(stored.id, outcome.detail);
   return outcome;
 }
@@ -110,6 +112,7 @@ async function applyEvent(
   order: typeof orders.$inferSelect,
   payment: typeof payments.$inferSelect,
   entity: { id?: string; error_description?: string } | undefined,
+  refundEntity: { id?: string; amount?: number; status?: string } | undefined,
 ): Promise<WebhookOutcome> {
   const sessionId =
     order.agentSessionId ??
@@ -202,6 +205,43 @@ async function applyEvent(
     });
 
     return { status: "processed", detail: "Order marked failed; stock released.", orderId: order.id };
+  }
+
+  if (eventType === "refund.processed" || eventType === "refund.created") {
+    if (order.state === "refunded" && payment.state === "refunded") {
+      return { status: "duplicate", detail: "Order was already refunded.", orderId: order.id };
+    }
+
+    await db
+      .update(payments)
+      .set({
+        state: "refunded",
+        raw: { ...(payment.raw ?? {}), refund: refundEntity ?? { id: null, viaWebhook: true } },
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, payment.id));
+    await db
+      .update(orders)
+      .set({ state: "refunded", updatedAt: new Date() })
+      .where(eq(orders.id, order.id));
+
+    // Deliberately does NOT touch stock. This event fires both for refunds
+    // issued here (where `refundOrderAction` has already made the stock
+    // decision) and for ones issued straight from the Razorpay dashboard,
+    // and the webhook cannot tell them apart. Restocking here would double
+    // the units in the first case; over-counting sells things that are not
+    // on the shelf, while under-counting is fixable by hand.
+    await record(sessionId, {
+      step: "CONFIRM",
+      observation: { summary: `Razorpay reported a refund for ${order.orderNumber}.` },
+      reasoning: {
+        summary: "Order and payment marked refunded. Stock left alone — the webhook cannot tell a dashboard refund from one issued here.",
+      },
+      action: { type: "webhook_refund_processed", verdict: "ALLOW" },
+      outcome: { status: "ok", detail: refundEntity?.id ?? "" },
+    });
+
+    return { status: "processed", detail: "Order marked refunded from webhook.", orderId: order.id };
   }
 
   return { status: "ignored", detail: `Event ${eventType} needs no action.` };

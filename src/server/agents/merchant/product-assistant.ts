@@ -292,7 +292,7 @@ export function composeTitle(brand: string, productName: string): string {
   if (!product) return label;
 
   // Word-boundary check so "Peak" does not match inside "Peakless".
-  const alreadyNamed = new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, "\\/** Lower-cased, trimmed, de-duplicated; tags are matched, not displayed as prose. */")}\\b`, "i").test(
+  const alreadyNamed = new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(
     product,
   );
   return alreadyNamed ? product : `${label} ${product}`;

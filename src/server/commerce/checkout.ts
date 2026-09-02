@@ -623,6 +623,12 @@ export async function confirmPayment(input: {
     .set({
       state: "captured",
       gatewayPaymentId: input.gatewayPaymentId,
+      // Rewritten to the gateway that actually settled, which is not always the
+      // one that opened the checkout: a saved-method purchase passes MockGateway
+      // explicitly while PAYMENT_GATEWAY is still razorpay. Refunds resolve the
+      // gateway from this column, so recording the opener would send a mock
+      // payment id to Razorpay.
+      gateway: gateway.name,
       updatedAt: new Date(),
     })
     .where(eq(payments.id, payment.id));

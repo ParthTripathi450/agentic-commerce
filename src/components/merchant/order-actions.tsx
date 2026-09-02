@@ -3,13 +3,27 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
-import { cancelOrderAction, fulfilOrderAction } from "@/server/merchant/order-actions";
+import {
+  cancelOrderAction,
+  fulfilOrderAction,
+  refundOrderAction,
+} from "@/server/merchant/order-actions";
 
-export function OrderActions({ orderId, state }: { orderId: string; state: string }) {
+export function OrderActions({
+  orderId,
+  state,
+  canRefund = false,
+}: {
+  orderId: string;
+  state: string;
+  canRefund?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Refunds are irreversible, so the button asks twice rather than once.
+  const [confirmingRefund, setConfirmingRefund] = useState(false);
 
   const run = (fn: () => Promise<{ ok: true; message: string } | { error: string }>) =>
     startTransition(async () => {
@@ -26,7 +40,7 @@ export function OrderActions({ orderId, state }: { orderId: string; state: strin
   const canFulfil = state === "paid";
   const canCancel = state === "paid" || state === "pending_payment";
 
-  if (!canFulfil && !canCancel) {
+  if (!canFulfil && !canCancel && !canRefund) {
     return <span className="text-xs text-subtle">—</span>;
   }
 
@@ -43,7 +57,36 @@ export function OrderActions({ orderId, state }: { orderId: string; state: strin
             Cancel
           </Button>
         ) : null}
+        {canRefund ? (
+          confirmingRefund ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={pending}
+                onClick={() => {
+                  setConfirmingRefund(false);
+                  run(() => refundOrderAction(orderId));
+                }}
+              >
+                {pending ? "…" : "Confirm refund"}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirmingRefund(false)}>
+                Keep
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirmingRefund(true)}>
+              Refund
+            </Button>
+          )
+        ) : null}
       </div>
+      {confirmingRefund ? (
+        <span className="text-xs text-muted-foreground">
+          Returns the full amount to the customer. This cannot be undone.
+        </span>
+      ) : null}
       {message ? <span className="text-xs text-success">{message}</span> : null}
       {error ? <span className="text-xs text-danger">{error}</span> : null}
     </div>

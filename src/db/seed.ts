@@ -390,7 +390,10 @@ async function main() {
     .filter(({ o }) => o.state === "paid" || o.state === "fulfilled");
   const paymentRows = paidOrders.map(({ o, id }) => ({
     orderId: id,
-    gateway: "razorpay_test",
+    // Fabricated ids that exist nowhere at Razorpay, so they must be labelled
+    // as mock: refunds resolve the gateway from this column, and calling the
+    // real API with a made-up payment id fails with "id does not exist".
+    gateway: "mock",
     gatewayOrderId: `order_${randomUUID().replace(/-/g, "").slice(0, 14)}`,
     gatewayPaymentId: `pay_${randomUUID().replace(/-/g, "").slice(0, 14)}`,
     amountMinor: o.totals!.totalMinor,

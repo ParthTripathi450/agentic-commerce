@@ -93,9 +93,10 @@ src/
     agents/merchant/        agent.ts (insights), detectors.ts,
                             product-assistant.ts, listing-actions.ts
     catalog/                search.ts, indexer.ts, normalize.ts, vocabulary.ts,
-                            featured.ts, actions.ts, image-actions.ts
+                            featured.ts, actions.ts, image-actions.ts,
+                            create-product.ts (THE single writer), attributes.ts
     commerce/               cart.ts, checkout.ts, gateway.ts, webhooks.ts,
-                            expiry.ts, cart-actions.ts, test-utils.ts
+                            expiry.ts, cart-actions.ts, refund.ts, test-utils.ts
     policy/engine.ts        the single gate for every consequential action
     protocols/              ap2/{keys,mandates}, mcp/{server,tools},
                             ucp/manifest, acp/feed, x402/facilitator
@@ -180,6 +181,24 @@ server is concurrent and it races with widget checkouts.
 `payment_methods` holds **no credentials** — no card number, CVV or token columns exist, and a test
 asserts that. Enabling a method generates fabricated display metadata server-side.
 
+**Refunds** (`server/commerce/refund.ts` + `refundOrderAction`): full-amount only, refunded through
+`gatewayByName(payment.gateway)` — **the rails the charge came in on, not the configured default**,
+because saved-method purchases settle on `MockGateway` even while `PAYMENT_GATEWAY=razorpay`.
+Eligibility and the stock decision are pure functions, and the stock decision differs by state:
+`paid` restocks (units never shipped), `fulfilled` does **not** (they were delivered), `canceled`
+does **not** (`cancelOrderAction` already returned them). The `refund.processed` webhook marks state
+but never touches stock — it cannot tell a dashboard refund from one issued here, and
+over-restocking sells phantom units while under-restocking is fixable by hand.
+
+### Product creation (`server/catalog/create-product.ts`)
+**One writer, two parsers.** The manual form and the assisted wizard parse genuinely different
+input (typed `key: value` lines + one variant vs. model-suggested JSON + N variant axes), but both
+write through `createProductWithVariants()`. They had already drifted three ways — only the wizard
+set `searchTags`, the SKU builders were duplicated, and only the wizard bounded the variant count.
+The writer owns validation, SKU reservation, inventory and re-indexing; the actions above it do
+auth, parsing and redirects only. `deriveSearchTags()` gives the manual path deterministic tags
+with **no LLM call**, so that form keeps working when the model is rate-limited.
+
 ### Protocols
 - **MCP**: 6 tools, stdio (`npm run mcp:stdio`) + stateless JSON-RPC at `/api/mcp`. No tool can
   charge; `prepare_purchase` returns an authorization URL.
@@ -240,6 +259,27 @@ asserts that. Enabling a method generates fabricated display metadata server-sid
 14. **Never put pure logic inside a `"use server"` module.** Those files import next-auth, which
     cannot load under Vitest, so anything defined there is untestable. Extract it to a plain module
     and import it back — `server/agents/merchant/variants.ts` is the pattern.
+15. **`payments.gateway` must name the gateway that SETTLED, not the one that opened the
+    checkout.** `authorizeCheckout()` writes the configured gateway; `confirmPayment()` may settle
+    through a different one passed explicitly (saved-method purchases pass `MockGateway` while
+    `PAYMENT_GATEWAY=razorpay`). Refunds resolve the gateway from this column, so the capture
+    update rewrites it. Seeded payments are labelled `mock` because their ids are fabricated and
+    do not exist at Razorpay.
+16. **`slugFragment` truncates each option to 4 characters**, so "Large" and "Larger" both yield
+    `LARG`. SKUs must be reserved **sequentially** with a local reserved-set; generating a batch
+    concurrently lets two variants agree on a base neither has inserted yet, and
+    `variants_sku_idx` then rejects the insert.
+17. **Interpolating a column into a `` sql`` `` template renders it UNQUALIFIED.**
+    `` sql`... WHERE ${orderItems.orderId} = ${orders.id}` `` becomes
+    `WHERE "order_id" = "id"`, and inside a correlated subquery Postgres binds both names to the
+    INNER table — `order_items.order_id = order_items.id`, always false. It does not error; it
+    silently returns 0 / NULL. The merchant orders page showed "0 units" and a blank product title
+    on every row this way, and an `EXISTS` written the same way silently hid the Refund control.
+    **In a correlated subquery, alias the inner table and name the outer one in full:**
+    `` sql`(SELECT ... FROM ${orderItems} AS oi WHERE oi.order_id = orders.id)` ``.
+    Interpolating a *value* (`${sessionId}`) is safe and unaffected — it becomes a bind parameter.
+
+
 
 ---
 

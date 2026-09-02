@@ -5,11 +5,11 @@ import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { inventory, productVariants, products } from "@/db/schema";
+import { products } from "@/db/schema";
 import { toMinor } from "@/lib/money";
 import { requireMerchant } from "@/lib/session";
+import { createProductWithVariants } from "@/server/catalog/create-product";
 import { indexCatalog } from "@/server/catalog/indexer";
-import { invalidateVocabulary } from "@/server/catalog/vocabulary";
 import {
   dedupeTags,
   generateProductDraft,
@@ -71,22 +71,6 @@ function parseJson<T>(raw: string, fallback: T): T {
   }
 }
 
-function slugFragment(value: string, length: number) {
-  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, length) || "X";
-}
-
-async function uniqueSku(base: string): Promise<string> {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`;
-    const [taken] = await db
-      .select({ id: productVariants.id })
-      .from(productVariants)
-      .where(eq(productVariants.sku, candidate))
-      .limit(1);
-    if (!taken) return candidate;
-  }
-  return `${base}-${Date.now().toString(36).toUpperCase()}`;
-}
 
 export async function createAssistedProductAction(_prev: unknown, formData: FormData) {
   const { merchant } = await requireMerchant();
@@ -119,53 +103,28 @@ export async function createAssistedProductAction(_prev: unknown, formData: Form
       error: `That would create ${built.count} variants. Trim the options to ${MAX_VARIANTS} or fewer, then add the rest from the product page.`,
     };
   }
-  const combos = built.combos;
 
-  const [product] = await db
-    .insert(products)
-    .values({
-      merchantId: merchant.id,
-      title: data.title,
-      description: data.description,
-      brand: data.brand ?? null,
-      category: data.category,
-      attributes,
-      searchTags: tags,
-      imageUrls: [],
-      status: data.status,
-    })
-    .returning();
+  const result = await createProductWithVariants({
+    merchantId: merchant.id,
+    merchantSlug: merchant.slug,
+    title: data.title,
+    description: data.description,
+    brand: data.brand ?? null,
+    category: data.category,
+    attributes,
+    searchTags: tags,
+    status: data.status,
+    variants: built.combos.map((combo) => ({
+      attributes: combo,
+      priceMinor: toMinor(data.price),
+      quantity: data.quantity,
+    })),
+  });
 
-  const created = await db
-    .insert(productVariants)
-    .values(
-      await Promise.all(
-        combos.map(async (combo) => ({
-          productId: product.id,
-          sku: await uniqueSku(
-            [
-              slugFragment(merchant.slug.split("-")[0], 3),
-              slugFragment(data.title.replace(/\s+/g, ""), 10),
-              ...Object.values(combo).map((v) => slugFragment(v, 4)),
-            ].join("-"),
-          ),
-          attributes: combo,
-          priceMinor: toMinor(data.price),
-          currency: "INR",
-          active: true,
-        })),
-      ),
-    )
-    .returning();
+  if (!result.ok) return { error: result.error };
 
-  await db
-    .insert(inventory)
-    .values(created.map((v) => ({ variantId: v.id, quantity: data.quantity })));
-
-  await indexCatalog({ productIds: [product.id], force: true });
-  invalidateVocabulary();
   revalidatePath("/merchant/products");
-  redirect(`/merchant/products/${product.id}`);
+  redirect(`/merchant/products/${result.productId}`);
 }
 
 const tagsSchema = z.object({

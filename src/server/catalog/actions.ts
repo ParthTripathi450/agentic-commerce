@@ -8,6 +8,12 @@ import { db } from "@/db";
 import { availabilityWindows, inventory, productVariants, products } from "@/db/schema";
 import { toMinor } from "@/lib/money";
 import { requireMerchant } from "@/lib/session";
+import { parseAttributeLines, toStringMap } from "@/server/catalog/attributes";
+import {
+  createProductWithVariants,
+  deriveSearchTags,
+  reserveSkus,
+} from "@/server/catalog/create-product";
 import { indexCatalog } from "@/server/catalog/indexer";
 import { invalidateVocabulary } from "@/server/catalog/vocabulary";
 
@@ -51,7 +57,7 @@ export async function updateProductAction(_prev: unknown, formData: FormData) {
     .set({
       ...fields,
       brand: fields.brand ?? null,
-      ...(attributes !== undefined ? { attributes: await parseAttributeLines(attributes) } : {}),
+      ...(attributes !== undefined ? { attributes: parseAttributeLines(attributes) } : {}),
       updatedAt: new Date(),
     })
     // Scoped to the merchant so one shop cannot edit another's catalog.
@@ -183,37 +189,6 @@ export async function getMerchantProducts(merchantId: string) {
   }));
 }
 
-/**
- * Parses the simple `key: value` lines merchants type into structured
- * attributes. Comma-separated values become arrays, and "true"/"false"/numbers
- * are coerced — agents filter on these, so types matter.
- */
-export async function parseAttributeLines(input: string): Promise<Record<string, unknown>> {
-  const attributes: Record<string, unknown> = {};
-  for (const line of input.split("\n")) {
-    const separator = line.indexOf(":");
-    if (separator < 0) continue;
-    const key = line.slice(0, separator).trim();
-    const raw = line.slice(separator + 1).trim();
-    if (!key || !raw) continue;
-
-    const camel = key
-      .toLowerCase()
-      .replace(/[^a-z0-9]+(.)/g, (_, c: string) => c.toUpperCase())
-      .replace(/[^a-zA-Z0-9]/g, "");
-
-    if (raw.includes(",")) {
-      attributes[camel] = raw.split(",").map((v) => v.trim()).filter(Boolean);
-    } else if (/^(true|false)$/i.test(raw)) {
-      attributes[camel] = raw.toLowerCase() === "true";
-    } else if (/^-?\d+(\.\d+)?$/.test(raw)) {
-      attributes[camel] = Number(raw);
-    } else {
-      attributes[camel] = raw;
-    }
-  }
-  return attributes;
-}
 
 /** Renders stored attributes back into the editable `key: value` form. */
 export async function formatAttributeLines(attributes: Record<string, unknown>): Promise<string> {
@@ -226,34 +201,6 @@ export async function formatAttributeLines(attributes: Record<string, unknown>):
     .join("\n");
 }
 
-function slugFragment(value: string, length: number) {
-  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, length) || "X";
-}
-
-/** Deterministic SKU, made unique with a short suffix if it collides. */
-async function generateSku(
-  merchantSlug: string,
-  title: string,
-  attributes: Record<string, string>,
-): Promise<string> {
-  const parts = [
-    slugFragment(merchantSlug.split("-")[0], 3),
-    slugFragment(title.replace(/\s+/g, ""), 10),
-    ...Object.values(attributes).map((v) => slugFragment(v, 4)),
-  ];
-  const base = parts.filter(Boolean).join("-");
-
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`;
-    const [existing] = await db
-      .select({ id: productVariants.id })
-      .from(productVariants)
-      .where(eq(productVariants.sku, candidate))
-      .limit(1);
-    if (!existing) return candidate;
-  }
-  return `${base}-${Date.now().toString(36).toUpperCase()}`;
-}
 
 const createProductSchema = z.object({
   title: z.string().min(3).max(240),
@@ -270,9 +217,8 @@ const createProductSchema = z.object({
 /**
  * Creates a product together with its first variant.
  *
- * A product with no variant has no price and no stock, so it could never be
- * bought or ranked — creating both together avoids a state that looks complete
- * in the dashboard but is invisible to every agent.
+ * Parsing only — the write goes through `createProductWithVariants`, the same
+ * path the assisted wizard uses, so the two cannot drift again.
  */
 export async function createProductAction(_prev: unknown, formData: FormData) {
   const { merchant } = await requireMerchant();
@@ -293,46 +239,37 @@ export async function createProductAction(_prev: unknown, formData: FormData) {
   }
 
   const data = parsed.data;
-  const variantAttributes = Object.fromEntries(
-    Object.entries(await parseAttributeLines(data.variantAttributes ?? "")).map(([k, v]) => [
-      k,
-      String(v),
-    ]),
-  );
 
-  const [product] = await db
-    .insert(products)
-    .values({
-      merchantId: merchant.id,
+  const result = await createProductWithVariants({
+    merchantId: merchant.id,
+    merchantSlug: merchant.slug,
+    title: data.title,
+    description: data.description,
+    brand: data.brand ?? null,
+    category: data.category,
+    attributes: parseAttributeLines(data.attributes ?? ""),
+    // Derived deterministically: this form must keep working with no model.
+    searchTags: deriveSearchTags({
       title: data.title,
-      description: data.description,
-      category: data.category,
       brand: data.brand ?? null,
-      attributes: await parseAttributeLines(data.attributes ?? ""),
-      status: data.status,
-      imageUrls: [],
-    })
-    .returning();
+      category: data.category,
+    }),
+    status: data.status,
+    variants: [
+      {
+        attributes: toStringMap(parseAttributeLines(data.variantAttributes ?? "")),
+        priceMinor: toMinor(data.price),
+        quantity: data.quantity,
+      },
+    ],
+  });
 
-  const [variant] = await db
-    .insert(productVariants)
-    .values({
-      productId: product.id,
-      sku: await generateSku(merchant.slug, data.title, variantAttributes),
-      attributes: variantAttributes,
-      priceMinor: toMinor(data.price),
-      currency: "INR",
-      active: true,
-    })
-    .returning();
+  if (!result.ok) return { error: result.error };
 
-  await db.insert(inventory).values({ variantId: variant.id, quantity: data.quantity });
-
-  await indexCatalog({ productIds: [product.id], force: true });
-  invalidateVocabulary();
   revalidatePath("/merchant/products");
-  redirect(`/merchant/products/${product.id}`);
+  redirect(`/merchant/products/${result.productId}`);
 }
+
 
 const addVariantSchema = z.object({
   productId: z.string().min(1),
@@ -361,7 +298,7 @@ export async function addVariantAction(_prev: unknown, formData: FormData) {
   if (!product) return { error: "That product is not yours to edit." };
 
   const attributes = Object.fromEntries(
-    Object.entries(await parseAttributeLines(parsed.data.variantAttributes)).map(([k, v]) => [
+    Object.entries(parseAttributeLines(parsed.data.variantAttributes)).map(([k, v]) => [
       k,
       String(v),
     ]),
@@ -384,7 +321,11 @@ export async function addVariantAction(_prev: unknown, formData: FormData) {
     .insert(productVariants)
     .values({
       productId: product.id,
-      sku: await generateSku(merchant.slug, product.title, attributes),
+      sku: (
+        await reserveSkus(merchant.slug, product.title, [
+          { attributes, priceMinor: toMinor(parsed.data.price), quantity: parsed.data.quantity },
+        ])
+      )[0],
       attributes,
       priceMinor: toMinor(parsed.data.price),
       currency: "INR",

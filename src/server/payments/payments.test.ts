@@ -102,6 +102,16 @@ describe("saved payment methods", () => {
 
       expect(confirmed.status).toBe("paid");
       expect(process.env.PAYMENT_GATEWAY).toBe("razorpay"); // untouched
+
+      // The row must name the gateway that SETTLED, not the one that opened the
+      // checkout. Refunds resolve the gateway from this column, so recording
+      // "razorpay_test" here would post a mock payment id to Razorpay.
+      const [settled] = await db
+        .select({ gateway: payments.gateway })
+        .from(payments)
+        .where(eq(payments.gatewayPaymentId, pid))
+        .limit(1);
+      expect(settled.gateway).toBe("mock");
     } finally {
       process.env.PAYMENT_GATEWAY = "mock";
       resetGatewayCache();

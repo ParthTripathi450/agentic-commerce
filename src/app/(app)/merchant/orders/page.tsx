@@ -3,7 +3,8 @@ import { PageHeader } from "@/components/page-header";
 import { Badge, Card, CardBody, EmptyState, type Tone } from "@/components/ui";
 import { OrderActions } from "@/components/merchant/order-actions";
 import { db } from "@/db";
-import { orderItems, orders } from "@/db/schema";
+import { orderItems, orders, payments } from "@/db/schema";
+import { canOfferRefund } from "@/server/commerce/refund";
 import { formatMoney } from "@/lib/money";
 import { requireMerchant } from "@/lib/session";
 
@@ -27,8 +28,15 @@ export default async function MerchantOrders() {
       totals: orders.totals,
       placedByAgent: orders.placedByAgent,
       createdAt: orders.createdAt,
-      itemCount: sql<number>`(SELECT COALESCE(SUM(quantity),0) FROM ${orderItems} WHERE ${orderItems.orderId} = ${orders.id})`,
-      firstItem: sql<string>`(SELECT title_snapshot FROM ${orderItems} WHERE ${orderItems.orderId} = ${orders.id} LIMIT 1)`,
+      // Inner tables are ALIASED and the outer one named in full. Interpolating
+      // a column into a sql`` template renders it UNQUALIFIED ("id", not
+      // "orders"."id"), so inside a correlated subquery it binds to the inner
+      // table's own column: `order_items.order_id = order_items.id` is always
+      // false, which silently showed "0 units" on every row.
+      itemCount: sql<number>`(SELECT COALESCE(SUM(oi.quantity), 0) FROM ${orderItems} AS oi WHERE oi.order_id = orders.id)`,
+      firstItem: sql<string>`(SELECT oi.title_snapshot FROM ${orderItems} AS oi WHERE oi.order_id = orders.id LIMIT 1)`,
+      // Drives the Refund control: money can only go back if some came in.
+      hasCapturedPayment: sql<boolean>`EXISTS (SELECT 1 FROM ${payments} AS p WHERE p.order_id = orders.id AND p.state = 'captured')`,
     })
     .from(orders)
     .where(eq(orders.merchantId, merchant.id))
@@ -66,7 +74,9 @@ export default async function MerchantOrders() {
                       <td className="px-5 py-2.5 font-mono text-xs">{order.orderNumber}</td>
                       <td className="px-3 py-2.5">
                         <span className="block max-w-56 truncate">{order.firstItem}</span>
-                        <span className="text-xs text-subtle">{Number(order.itemCount)} units</span>
+                        <span className="text-xs text-subtle">
+                          {Number(order.itemCount)} unit{Number(order.itemCount) === 1 ? "" : "s"}
+                        </span>
                       </td>
                       <td className="px-3 py-2.5">
                         {order.placedByAgent ? (
@@ -91,7 +101,11 @@ export default async function MerchantOrders() {
                         {formatMoney(order.totals.totalMinor, order.totals.currency)}
                       </td>
                       <td className="px-5 py-2.5 text-right">
-                        <OrderActions orderId={order.id} state={order.state} />
+                        <OrderActions
+                          orderId={order.id}
+                          state={order.state}
+                          canRefund={canOfferRefund(order.state, order.hasCapturedPayment)}
+                        />
                       </td>
                     </tr>
                   ))}

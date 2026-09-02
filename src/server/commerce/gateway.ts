@@ -22,6 +22,14 @@ export type PaymentVerification = {
   raw?: Record<string, unknown>;
 };
 
+export type GatewayRefund = {
+  gatewayRefundId: string;
+  amountMinor: number;
+  /** Gateways may settle a refund asynchronously; `pending` is not a failure. */
+  status: "processed" | "pending" | "failed";
+  raw: Record<string, unknown>;
+};
+
 export interface PaymentGateway {
   readonly name: string;
   /** Key id safe to expose to the browser checkout widget. */
@@ -40,6 +48,12 @@ export interface PaymentGateway {
   }): PaymentVerification;
   verifyWebhookSignature(rawBody: string, signature: string): boolean;
   fetchPayment(gatewayPaymentId: string): Promise<Record<string, unknown> | null>;
+  /** Returns a captured payment. Full amount only — partial refunds are not modelled. */
+  refundPayment(input: {
+    gatewayPaymentId: string;
+    amountMinor: number;
+    notes?: Record<string, string>;
+  }): Promise<GatewayRefund>;
 }
 
 /** Constant-time compare so signature checks do not leak via timing. */
@@ -137,6 +151,43 @@ class RazorpayGateway implements PaymentGateway {
     if (!response.ok) return null;
     return (await response.json()) as Record<string, unknown>;
   }
+
+  async refundPayment(input: {
+    gatewayPaymentId: string;
+    amountMinor: number;
+    notes?: Record<string, string>;
+  }): Promise<GatewayRefund> {
+    const response = await fetch(
+      `https://api.razorpay.com/v1/payments/${input.gatewayPaymentId}/refund`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${this.auth()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount: input.amountMinor,
+          speed: "normal",
+          notes: input.notes ?? {},
+        }),
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+
+    const raw = (await response.json()) as Record<string, unknown>;
+    if (!response.ok) {
+      const error = raw.error as { description?: string } | undefined;
+      throw new Error(`Razorpay refund failed: ${error?.description ?? response.status}`);
+    }
+
+    const status = String(raw.status ?? "processed");
+    return {
+      gatewayRefundId: String(raw.id),
+      amountMinor: Number(raw.amount ?? input.amountMinor),
+      status: status === "failed" ? "failed" : status === "pending" ? "pending" : "processed",
+      raw,
+    };
+  }
 }
 
 /**
@@ -199,6 +250,26 @@ class MockGateway implements PaymentGateway {
   async fetchPayment(gatewayPaymentId: string) {
     return this.payments.get(gatewayPaymentId) ?? { id: gatewayPaymentId, status: "captured", mock: true };
   }
+
+  async refundPayment(input: {
+    gatewayPaymentId: string;
+    amountMinor: number;
+    notes?: Record<string, string>;
+  }): Promise<GatewayRefund> {
+    const gatewayRefundId = `rfnd_mock_${randomUUID().replace(/-/g, "").slice(0, 14)}`;
+    return {
+      gatewayRefundId,
+      amountMinor: input.amountMinor,
+      status: "processed",
+      raw: {
+        id: gatewayRefundId,
+        payment_id: input.gatewayPaymentId,
+        amount: input.amountMinor,
+        notes: input.notes ?? {},
+        mock: true,
+      },
+    };
+  }
 }
 
 let cached: PaymentGateway | null = null;
@@ -209,6 +280,20 @@ export function paymentGateway(): PaymentGateway {
   const selected = process.env.PAYMENT_GATEWAY ?? env().PAYMENT_GATEWAY;
   cached = selected === "razorpay" ? new RazorpayGateway() : new MockGateway();
   return cached;
+}
+
+/**
+ * Resolves the gateway that actually took a payment, by the name stored on the
+ * payment row.
+ *
+ * A refund must go back through the same rails the charge came in on. The
+ * configured gateway is not a safe proxy for that: saved-method purchases
+ * settle through `MockGateway` even while `PAYMENT_GATEWAY=razorpay`, so
+ * refunding one via `paymentGateway()` would post a mock payment id to
+ * Razorpay and fail.
+ */
+export function gatewayByName(name: string): PaymentGateway {
+  return name === "razorpay_test" ? new RazorpayGateway() : new MockGateway();
 }
 
 export { MockGateway };

@@ -26,6 +26,20 @@ describe("composeTitle", () => {
     expect(composeTitle("Peak", "Peakless Trail Shoe")).toBe("Peak Peakless Trail Shoe");
   });
 
+  it("survives brands containing regex metacharacters", () => {
+    // The escape replacement was once a pasted doc comment instead of "$&",
+    // which made `new RegExp` throw for any brand with a . + * ? ( ) etc.
+    expect(composeTitle("Dr. Martens", "Dr. Martens 1460 Boot")).toBe("Dr. Martens 1460 Boot");
+    expect(composeTitle("M+S", "M+S Trail Tyre")).toBe("M+S Trail Tyre");
+    expect(composeTitle("A.P.C.", "Petit New Standard")).toBe("A.P.C. Petit New Standard");
+    expect(composeTitle(" (Di)vision", "Reworked Denim")).toBe("(Di)vision Reworked Denim");
+  });
+
+  it("still escapes rather than treating a metacharacter as a wildcard", () => {
+    // "A.C" must not match "ABC" via the dot; the brand is then prefixed.
+    expect(composeTitle("A.C", "ABC Runner")).toBe("A.C ABC Runner");
+  });
+
   it("is case-insensitive about the brand already being there", () => {
     expect(composeTitle("Nike", "nike air max")).toBe("nike air max");
   });
