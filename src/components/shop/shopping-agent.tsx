@@ -3,13 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Image from "next/image";
-import { ChevronDown, ShieldCheck, ShoppingCart, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ShieldCheck, ShoppingCart, Sparkles } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody, Input } from "@/components/ui";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { OptionDto, TurnDto } from "@/server/agents/customer/dto";
-import { PurchaseFlow } from "./purchase-flow";
 import { QuantityStepper } from "@/components/cart/quantity-stepper";
 import { addToCartAction } from "@/server/commerce/cart-actions";
 import { AutonomousFlow } from "./autonomous-flow";
@@ -17,6 +16,7 @@ import { ClarifyPanel, ConversationTrail } from "./clarify-panel";
 // The same pure helper the agent uses server-side, so chips and free text are
 // folded into the message identically on both sides.
 import { applyAnswer, type SlotId } from "@/server/agents/customer/clarify";
+import { AlsoLike } from "./also-like";
 import { FeaturedGrid } from "./featured-grid";
 import type { FeaturedProduct } from "@/server/catalog/featured";
 
@@ -208,13 +208,7 @@ export function ShoppingAgent({
       ) : null}
 
       {!turn && !pending && !error ? (
-        <FeaturedGrid
-          products={featured}
-          onPick={(title) => {
-            setQuery(title);
-            void run(title);
-          }}
-        />
+        <FeaturedGrid products={featured} />
       ) : null}
     </div>
   );
@@ -241,7 +235,8 @@ function AgentProgress() {
 }
 
 function TurnView({ turn }: { turn: TurnDto }) {
-  const [buying, setBuying] = useState<{ option: OptionDto; quantity: number } | null>(null);
+  // The last thing added, so the page can suggest what goes with it.
+  const [justAdded, setJustAdded] = useState<OptionDto | null>(null);
 
   /*
    * The exact thing is unavailable, but we sell something close.
@@ -268,8 +263,8 @@ function TurnView({ turn }: { turn: TurnDto }) {
               <OptionCard
                 option={option}
                 intent={turn.intent}
-                selected={buying?.option.variantId === option.variantId}
-                onSelect={(quantity) => setBuying({ option, quantity })}
+                selected={false}
+                onAdded={setJustAdded}
               />
             </div>
           ))}
@@ -303,16 +298,8 @@ function TurnView({ turn }: { turn: TurnDto }) {
 
       {turn.points.length > 0 ? <ReasonsPanel points={turn.points} /> : null}
 
-      {buying ? (
-        <PurchaseFlow
-          key={buying.option.variantId}
-          variantId={buying.option.variantId}
-          productTitle={buying.option.title}
-          quantity={buying.quantity}
-          agentSessionId={turn.sessionId}
-          intentText={turn.intent.productQuery}
-          onClose={() => setBuying(null)}
-        />
+      {justAdded ? (
+        <AlsoLike productId={justAdded.productId} title={justAdded.title} />
       ) : null}
 
       <div className="space-y-3">
@@ -321,8 +308,8 @@ function TurnView({ turn }: { turn: TurnDto }) {
             key={option.variantId}
             option={option}
             intent={turn.intent}
-            selected={buying?.option.variantId === option.variantId}
-            onSelect={(quantity) => setBuying({ option, quantity })}
+            selected={false}
+            onAdded={setJustAdded}
           />
         ))}
       </div>
@@ -406,14 +393,16 @@ function OptionCard({
   option,
   intent,
   selected,
-  onSelect,
+  onAdded,
 }: {
   option: OptionDto;
   intent: TurnDto["intent"];
   selected: boolean;
-  onSelect: (quantity: number) => void;
+  /** Fired after a successful add, so the page can suggest what goes with it. */
+  onAdded?: (option: OptionDto) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [added, setAdded] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [adding, startAdding] = useTransition();
   const [addMessage, setAddMessage] = useState<string | null>(null);
@@ -503,36 +492,53 @@ function OptionCard({
               onChange={setQuantity}
             />
 
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={adding || option.availableQuantity === 0}
-                onClick={() =>
-                  startAdding(async () => {
-                    const form = new FormData();
-                    form.set("variantId", option.variantId);
-                    form.set("quantity", String(quantity));
-                    const result = await addToCartAction(null, form);
-                    setAddMessage(result?.error ?? result?.message ?? null);
-                    router.refresh();
-                  })
-                }
-              >
-                <ShoppingCart className="size-4" />
-                {adding ? "Adding…" : "Add to cart"}
-              </Button>
-
-              <Button
-                size="sm"
-                variant={isTop ? "primary" : "ghost"}
-                onClick={() => onSelect(quantity)}
-                disabled={selected || option.availableQuantity === 0}
-              >
-                {selected ? "Selected" : "Buy now"}
-              </Button>
-            </div>
+            {/*
+              * Add to cart only.
+              *
+              * "Buy now" ran a separate direct-purchase path that built its own
+              * basket, which is what let a declined payment leave an item
+              * behind. One route into the cart means one place for that to go
+              * wrong, and the shopper checks out when they are ready.
+              */}
+            <Button
+              size="sm"
+              variant={isTop ? "primary" : "secondary"}
+              disabled={adding || option.availableQuantity === 0}
+              onClick={() =>
+                startAdding(async () => {
+                  const form = new FormData();
+                  form.set("variantId", option.variantId);
+                  form.set("quantity", String(quantity));
+                  const result = await addToCartAction(null, form);
+                  setAddMessage(result?.error ?? result?.message ?? null);
+                  if (!result?.error) {
+                    setAdded(true);
+                    onAdded?.(option);
+                  }
+                  router.refresh();
+                })
+              }
+            >
+              <ShoppingCart className="size-4" />
+              {adding ? "Adding…" : added ? "Add another" : "Add to cart"}
+            </Button>
           </div>
+
+          {added ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-success/30 bg-success-soft/40 px-3 py-2">
+              <Check className="size-4 text-success" aria-hidden />
+              <span className="text-sm">In your cart.</span>
+              <Button size="sm" variant="ghost" onClick={() => router.push("/cart")}>
+                Go to cart
+              </Button>
+              <Button size="sm" onClick={() => router.push("/checkout")}>
+                Proceed to pay
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                …or keep looking — nothing is charged until you check out.
+              </span>
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <button

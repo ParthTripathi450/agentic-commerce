@@ -21,6 +21,7 @@ import {
 } from "@/server/protocols/ap2/mandates";
 import {
   commitStock,
+  discardAgentCart,
   loadCart,
   markCartConverted,
   releaseStock,
@@ -383,10 +384,18 @@ export async function authorizeCheckout(input: {
       .where(eq(checkoutSessions.id, session.id));
     await releaseStock(cart.lines);
 
+    // A basket the AGENT assembled and the shopper declined should not linger
+    // in their cart. One they built themselves survives — they chose to put it
+    // there, and declining a payment is not the same as changing their mind.
+    const discarded = await discardAgentCart(cart.cartId);
+
     if (input.sessionId) {
       await record(sessionId, {
         step: "AUTHORIZE",
-        observation: { summary: `Shopper declined: ${approval.summary}` },
+        observation: {
+          summary: `Shopper declined: ${approval.summary}`,
+          inputs: { agentCartDiscarded: discarded },
+        },
         reasoning: { summary: "Authorization refused by the shopper. No money moved." },
         action: { type: "pay", approvalId: approval.id, verdict: "DENY" },
         outcome: { status: "blocked", detail: "declined by shopper" },

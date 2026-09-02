@@ -3,13 +3,13 @@
 Read `NOTES.md` first for architecture and conventions. This file is the state snapshot.
 
 **Last updated:** 2026-09-02
-**Health:** 203 tests passing (25 files) · 0 lint issues · production build clean ·
-38 route files · 32 tables
+**Health:** 206 tests passing (25 files) · 0 lint issues · production build clean ·
+40 route files · 32 tables
 **Git:** pushed to `origin/main`
 **Repo:** https://github.com/ParthTripathi450/agentic-commerce-platform (private)
 
-**Local data:** 18 merchants · 142 active products · 938 variants · 38 categories ·
-24 users · 142/142 indexed · **86 footwear products across 12 shoe categories**
+**Local data:** 21 merchants · 184 active products · ~1,560 variants · 50 categories ·
+24 users · 184/184 indexed · 86 footwear + 42 apparel products
 
 ---
 
@@ -168,6 +168,29 @@ cap was hit during testing. `GROQ_FAST_MODEL=openai/gpt-oss-20b` now serves conv
 fewer tokens and a separate daily pool. Groq's catalogue had rotated again (§8.6) — no
 `llama-3.1-8b-instant`; `gpt-oss-20b` and `qwen3.x-27b` are what is available.
 **Groq is the only configured provider — a `GEMINI_API_KEY` would give real failover.**
+
+### Cart correctness, product pages and cross-sell
+Two genuine cart bugs, both from there being TWO routes into the basket:
+1. **`startDirectPurchase` deleted every item** in the shopper's open cart for that merchant, so
+   "Buy now" silently discarded whatever they had already collected. It now creates its own cart.
+2. **A declined payment left the agent's item in the cart.** `carts.agentSessionId` now
+   distinguishes an agent-assembled basket from the shopper's own: the agent's is discarded on
+   decline, the shopper's survives. Three regression tests.
+
+**"Buy now" removed** from the AI shop (and with it the purchase modal). One route into the cart
+means one place for it to go wrong. Every ranked option is addable — not just the top pick — and
+after adding, the card offers *Go to cart* / *Proceed to pay* while the conversation continues.
+
+**Cross-sell** (`recommendations.ts`): real co-purchase from `order_items`, falling back to pgvector
+similarity. Running shoes → "DryFit Training T-Shirt — often bought with this (3 orders)".
+
+**Shopper product page** at `/product/[id]`: images, specs, per-variant stock, add to cart.
+"Popular across the marketplace" (already ranked by real 30-day units sold) now links straight to it
+instead of re-running a search for the title.
+
+**Apparel added**: 42 products, 3 merchants (Loom & Thread, Northwind Outdoor, Atelier Nine) —
+`npm run db:seed-clothes`. Clothing is what shoes are bought with, so this is also what makes the
+co-purchase recommendations meaningful.
 
 ### Selling substitutes, and stock-backed suggestion chips
 **The agent's aim is to sell**, so "no results" is now only for things the marketplace genuinely

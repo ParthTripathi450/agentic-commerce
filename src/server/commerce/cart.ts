@@ -77,6 +77,8 @@ export async function addToCart(input: {
   variantId: string;
   quantity?: number;
   agentSessionId?: string;
+  /** Target a specific basket instead of the shopper's open one. */
+  cartId?: string;
 }) {
   const [row] = await db
     .select({
@@ -105,7 +107,9 @@ export async function addToCart(input: {
     );
   }
 
-  const cart = await getOrCreateCart(input.userId, row.merchantId, input.agentSessionId);
+  const cart = input.cartId
+    ? { id: input.cartId }
+    : await getOrCreateCart(input.userId, row.merchantId, input.agentSessionId);
 
   await db
     .insert(cartItems)
@@ -358,10 +362,41 @@ export async function startDirectPurchase(input: {
     .limit(1);
   if (!row) throw new Error("That product variant no longer exists.");
 
-  const cart = await getOrCreateCart(input.userId, row.merchantId, input.agentSessionId);
-  await db.delete(cartItems).where(eq(cartItems.cartId, cart.id));
+  /*
+   * A dedicated cart, never the shopper's own.
+   *
+   * This used to reuse the open cart for that merchant and DELETE everything in
+   * it, so buying one item silently discarded whatever the shopper had already
+   * collected from that seller. It is also what left an item behind after a
+   * declined payment: the agent's basket was indistinguishable from theirs.
+   */
+  const [cart] = await db
+    .insert(carts)
+    .values({
+      userId: input.userId,
+      merchantId: row.merchantId,
+      agentSessionId: input.agentSessionId ?? null,
+    })
+    .returning();
 
-  return addToCart(input);
+  // Through addToCart so stock checks and price snapshotting stay in one place.
+  await addToCart({ ...input, cartId: cart.id });
+  return cart;
+}
+
+/**
+ * Discards a basket the agent assembled but the shopper never accepted.
+ *
+ * Only ever touches agent-created carts: one the shopper built themselves must
+ * survive a declined payment, because they still chose to put it there.
+ */
+export async function discardAgentCart(cartId: string): Promise<boolean> {
+  const [cart] = await db.select().from(carts).where(eq(carts.id, cartId)).limit(1);
+  if (!cart?.agentSessionId) return false;
+
+  await db.delete(cartItems).where(eq(cartItems.cartId, cart.id));
+  await db.update(carts).set({ status: "abandoned", updatedAt: new Date() }).where(eq(carts.id, cart.id));
+  return true;
 }
 
 /** Sets an exact line quantity, removing the line at zero. */

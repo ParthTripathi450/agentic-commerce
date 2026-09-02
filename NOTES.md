@@ -254,6 +254,23 @@ actually buy. Two deterministic guards sit over the model: a repeated question i
 redirected, and a chip row is never rendered empty (`optionsForSlot` fills gaps for purpose/gender,
 which are needs rather than countable attributes).
 
+### Recommendations (`server/catalog/recommendations.ts`)
+Two different questions, two sources. **`alsoBought`** is real co-purchase from `order_items` — what
+shoppers actually put in the same order, so it surfaces genuine complements (a t-shirt with running
+shoes). **`similarTo`** is nearest-neighbour on the same pgvector embeddings search uses, so
+"similar" means the same thing everywhere. Both require live stock; both dedupe by title, because a
+product stocked by several merchants otherwise fills every slot with itself.
+
+### Cart ownership
+`carts.agentSessionId` distinguishes a basket the AGENT assembled from one the shopper built, and
+that distinction is load-bearing: on a declined payment the agent's basket is discarded
+(`discardAgentCart`) while the shopper's survives — declining a payment is not the same as changing
+your mind. `startDirectPurchase` creates its OWN cart; it used to reuse the shopper's open cart for
+that merchant and delete everything in it.
+
+**There is one route into the cart** (`addToCart`). "Buy now" was a second path with its own basket
+and modal, which is exactly where the lingering-item bug lived.
+
 ### Group checkout### Group checkout (`server/commerce/group-checkout.ts`)
 One payment across merchants. Carts stay per-merchant because fulfilment, returns and the AP2 Cart
 Mandate all are — a merchant can only sign for their own basket. The group is the **settlement**

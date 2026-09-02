@@ -2,13 +2,14 @@ import { and, eq, sql } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/db";
 import {
+  carts,
   inventory,
   merchants,
   orders,
   productVariants,
   products,
 } from "@/db/schema";
-import { addToCart, loadCart } from "./cart";
+import { addToCart, discardAgentCart, loadCart, startDirectPurchase } from "./cart";
 import { resetGatewayCache } from "./gateway";
 import { emptyOpenCarts, ensureStock, provisionTestShopper } from "./test-utils";
 import { authorizeCheckout, confirmPayment, prepareCheckout } from "./checkout";
@@ -169,5 +170,78 @@ describe("checkout", () => {
 
     expect(replay.status).toBe("failed");
     expect(replay.status === "failed" && replay.reason).toContain("already");
+  });
+});
+
+
+describe("a declined payment and the cart", () => {
+  it("does not discard a basket the SHOPPER built", async () => {
+    // Declining a payment is not the same as changing your mind about the item.
+    const [pick] = (await db.execute(`
+      SELECT v.id AS variant_id FROM product_variants v
+      JOIN products p ON p.id = v.product_id
+      JOIN inventory i ON i.variant_id = v.id
+      WHERE v.active AND p.status='active' AND i.quantity > 5 LIMIT 1
+    `)) as unknown as { variant_id: string }[];
+
+    await emptyOpenCarts(userId);
+    await ensureStock(pick.variant_id, 5);
+    const cart = await addToCart({ userId, variantId: pick.variant_id, quantity: 1 });
+
+    const [row] = await db.select().from(carts).where(eq(carts.id, cart.id));
+    expect(row.agentSessionId).toBeNull();
+    expect(await discardAgentCart(cart.id)).toBe(false);
+
+    const after = await loadCart(cart.id);
+    expect(after.lines.length).toBeGreaterThan(0);
+  });
+
+  it("discards a basket the AGENT assembled", async () => {
+    const [pick] = (await db.execute(`
+      SELECT v.id AS variant_id FROM product_variants v
+      JOIN products p ON p.id = v.product_id
+      JOIN inventory i ON i.variant_id = v.id
+      WHERE v.active AND p.status='active' AND i.quantity > 5 LIMIT 1
+    `)) as unknown as { variant_id: string }[];
+
+    await emptyOpenCarts(userId);
+    await ensureStock(pick.variant_id, 5);
+    const cart = await startDirectPurchase({
+      userId,
+      variantId: pick.variant_id,
+      quantity: 1,
+      agentSessionId: "test-agent-session",
+    });
+
+    expect(await discardAgentCart(cart.id)).toBe(true);
+    expect((await loadCart(cart.id)).lines).toHaveLength(0);
+  });
+
+  it("never wipes the shopper's existing basket to make room for a direct purchase", async () => {
+    // startDirectPurchase used to delete every item in the open cart for that
+    // merchant, so buying one thing silently discarded the rest.
+    const picks = (await db.execute(`
+      SELECT DISTINCT ON (p.merchant_id) v.id AS variant_id, p.merchant_id
+      FROM product_variants v
+      JOIN products p ON p.id = v.product_id
+      JOIN inventory i ON i.variant_id = v.id
+      WHERE v.active AND p.status='active' AND i.quantity > 5
+      ORDER BY p.merchant_id, v.id LIMIT 1
+    `)) as unknown as { variant_id: string }[];
+
+    await emptyOpenCarts(userId);
+    await ensureStock(picks[0].variant_id, 8);
+    const shopperCart = await addToCart({ userId, variantId: picks[0].variant_id, quantity: 2 });
+
+    await startDirectPurchase({
+      userId,
+      variantId: picks[0].variant_id,
+      quantity: 1,
+      agentSessionId: "test-agent-session-2",
+    });
+
+    const still = await loadCart(shopperCart.id);
+    expect(still.lines).toHaveLength(1);
+    expect(still.lines[0].quantity).toBe(2);
   });
 });

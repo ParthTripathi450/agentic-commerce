@@ -1,40 +1,34 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { Card } from "@/components/ui";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { formatMoney } from "@/lib/money";
 import type { FeaturedProduct } from "@/server/catalog/featured";
 
 /**
- * Landing merchandising.
+ * Landing merchandising, ranked by units actually sold in the last 30 days.
  *
- * Clicking a card does not open a product page — it hands the title to the
- * shopping agent, because searching is how you buy here. The card is a prompt,
- * not a link.
+ * Cards link straight to the product. Handing the title back to the agent as a
+ * search made a shopper who had already chosen something start over from a
+ * query, and re-derived by keyword what was already known exactly.
  */
-export function FeaturedGrid({
-  products,
-  onPick,
-}: {
-  products: FeaturedProduct[];
-  onPick: (query: string) => void;
-}) {
+export function FeaturedGrid({ products }: { products: FeaturedProduct[] }) {
   if (products.length === 0) return null;
 
   return (
     <section className="mt-8">
       <h2 className="text-sm font-semibold">Popular across the marketplace</h2>
       <p className="mt-0.5 mb-4 text-sm text-muted-foreground">
-        Selling most in the last 30 days. Pick one to ask the agent about it.
+        Ranked by units sold in the last 30 days. Pick one to see it in full.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {products.map((product) => (
           <Card key={product.productId} className="overflow-hidden py-0">
-            <button
-              type="button"
-              onClick={() => onPick(product.title)}
+            <Link
+              href={`/product/${product.productId}`}
               className="flex h-full w-full flex-col text-left transition-colors hover:bg-muted/50"
             >
               <div className="aspect-square w-full overflow-hidden bg-muted">
@@ -60,7 +54,7 @@ export function FeaturedGrid({
                   {formatMoney(product.priceMinor, product.currency)}
                 </p>
               </div>
-            </button>
+            </Link>
           </Card>
         ))}
       </div>
