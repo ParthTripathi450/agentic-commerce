@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { Check, ChevronDown, ShieldCheck, ShoppingCart, Sparkles } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody, Input } from "@/components/ui";
 import { StarDisplay } from "@/components/reviews/star-rating";
@@ -17,6 +18,7 @@ import { ClarifyPanel, ConversationTrail } from "./clarify-panel";
 // folded into the message identically on both sides.
 import { applyAnswer, type SlotId } from "@/server/agents/customer/clarify";
 import { AlsoLike } from "./also-like";
+import { PriorityEditor } from "./priority-editor";
 import { FeaturedGrid } from "./featured-grid";
 import type { FeaturedProduct } from "@/server/catalog/featured";
 
@@ -51,6 +53,7 @@ export function ShoppingAgent({
    * turns chips straight into filters and drifts from it.
    */
   const [message, setMessage] = useState("");
+  const [criteriaOrder, setCriteriaOrder] = useState<string[]>([]);
   const [answered, setAnswered] = useState<string[]>([]);
   const [trail, setTrail] = useState<{ question: string; answer: string }[]>([]);
 
@@ -66,7 +69,7 @@ export function ShoppingAgent({
       const response = await fetch("/api/agent/shop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, answered, skipQuestions, history: [] }),
+        body: JSON.stringify({ message, answered, skipQuestions, history: [], criteriaOrder }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -80,7 +83,41 @@ export function ShoppingAgent({
     } finally {
       setPending(false);
     }
-  }, []);
+  }, [criteriaOrder]);
+
+  /**
+   * Re-rank the SAME results under a new ordering.
+   *
+   * Replays the query rather than re-sorting client-side, so the score
+   * breakdown and the explanation are regenerated from the new weights — the
+   * stated reasons must always be the reasons that actually decided the order.
+   */
+  const reRank = useCallback(
+    (order: string[]) => {
+      setCriteriaOrder(order);
+      void (async () => {
+        setPending(true);
+        try {
+          const response = await fetch("/api/agent/shop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message,
+              answered,
+              skipQuestions: true,
+              history: [],
+              criteriaOrder: order,
+            }),
+          });
+          const data = await response.json();
+          if (response.ok) setTurn(data as TurnDto);
+        } finally {
+          setPending(false);
+        }
+      })();
+    },
+    [answered, message],
+  );
 
   /** A new search clears the previous conversation — answers must not leak across it. */
   const startConversation = useCallback(
@@ -203,7 +240,7 @@ export function ShoppingAgent({
       {turn && !pending && turn.outcome !== "asking" ? (
         <div className="space-y-3">
           <ConversationTrail entries={trail} />
-          <TurnView turn={turn} />
+          <TurnView turn={turn} onReorder={reRank} />
         </div>
       ) : null}
 
@@ -234,7 +271,7 @@ function AgentProgress() {
   );
 }
 
-function TurnView({ turn }: { turn: TurnDto }) {
+function TurnView({ turn, onReorder }: { turn: TurnDto; onReorder: (order: string[]) => void }) {
   // The last thing added, so the page can suggest what goes with it.
   const [justAdded, setJustAdded] = useState<OptionDto | null>(null);
 
@@ -294,6 +331,14 @@ function TurnView({ turn }: { turn: TurnDto }) {
             ))}
           </ul>
         </Alert>
+      ) : null}
+
+      {turn.criteria.length > 0 ? (
+        <PriorityEditor
+          criteria={turn.criteria}
+          pending={false}
+          onReorder={onReorder}
+        />
       ) : null}
 
       {turn.points.length > 0 ? <ReasonsPanel points={turn.points} /> : null}
@@ -444,7 +489,14 @@ function OptionCard({
                 {isTop ? null : <Badge>#{option.rank}</Badge>}
                 <span className="text-xs text-muted-foreground">{option.merchant.name}</span>
               </div>
-              <h3 className="mt-1.5 text-sm font-semibold">{option.title}</h3>
+              <h3 className="mt-1.5 text-sm font-semibold">
+                <Link
+                  href={`/product/${option.productId}`}
+                  className="hover:text-primary hover:underline"
+                >
+                  {option.title}
+                </Link>
+              </h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {Object.entries(option.variantAttributes)
                   .map(([k, v]) => `${k} ${v}`)
@@ -459,12 +511,18 @@ function OptionCard({
           </div>
 
           <div className="text-right">
+            {/* Tracks the stepper — this is the figure being decided on. */}
             <p className="tabular text-base font-semibold">
-              {formatMoney(option.priceMinor, option.currency)}
+              {formatMoney(option.priceMinor * quantity, option.currency)}
             </p>
+            {quantity > 1 ? (
+              <p className="text-xs text-muted-foreground">
+                {quantity} × {formatMoney(option.priceMinor, option.currency)}
+              </p>
+            ) : null}
             {option.compareAtPriceMinor ? (
               <p className="tabular text-xs text-subtle line-through">
-                {formatMoney(option.compareAtPriceMinor, option.currency)}
+                {formatMoney(option.compareAtPriceMinor * quantity, option.currency)}
               </p>
             ) : null}
           </div>

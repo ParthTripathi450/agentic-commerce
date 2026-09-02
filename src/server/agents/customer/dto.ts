@@ -1,6 +1,6 @@
 import type { Criterion } from "@/lib/agent-types";
 import type { ShoppingTurn } from "./agent";
-import type { RankingResult } from "./ranker";
+import { CRITERION_LABELS, type RankingResult } from "./ranker";
 
 type RankedItem = RankingResult["ranked"][number];
 
@@ -67,6 +67,13 @@ export type TurnDto = {
   }[];
   /** Constraints set aside to find them. */
   alternativesDropped: string[];
+  /**
+   * What the ranking weighted, most important first.
+   *
+   * Sent so the shopper can SEE the order that produced these results and
+   * change it — a ranking whose priorities are hidden cannot be argued with.
+   */
+  criteria: { key: string; label: string; hint: string; weight: number }[];
   narrative: string | null;
   /** Short scannable reasons, generated from the score vector. */
   points: string[];
@@ -165,6 +172,12 @@ export function toTurnDto(turn: ShoppingTurn): TurnDto {
       differences: a.differences,
     })),
     alternativesDropped: turn.alternativesDropped,
+    criteria: turn.criteriaOrder.map((key) => ({
+      key,
+      label: CRITERION_LABELS[key].label,
+      hint: CRITERION_LABELS[key].hint,
+      weight: turn.ranking.weights[key] ?? 0,
+    })),
     comparisons:
       turn.explanation?.comparisons.map((c) => ({
         rank: c.rank,

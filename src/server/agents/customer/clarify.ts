@@ -83,6 +83,41 @@ const WIDTHS: SlotOption[] = [
 const VAGUE_QUERIES =
   /^\s*(?:i\s+(?:want|need|am looking for|'?m looking for)\s+)?(?:some\s+|a\s+|an\s+|new\s+)*(shoes?|footwear|trainers?|sneakers?|boots?|clothes|clothing|something)\s*\.?\s*$/i;
 
+/**
+ * Whether the shopper said anything about WHAT the item is for.
+ *
+ * Deliberately not a list of sports. An earlier version enumerated
+ * running/football/hiking/… and so asked "what will you use them for?" at
+ * someone who had just said "tennis shoes" — and would have done the same for
+ * badminton, squash, golf and every sport nobody thought to add.
+ *
+ * Instead: strip the filler and the product noun itself. If ANYTHING
+ * meaningful is left, the shopper has qualified the request and asking again
+ * is just not listening.
+ */
+const FILLER = new Set([
+  "i", "am", "im", "a", "an", "the", "some", "any", "want", "need", "looking",
+  "look", "for", "me", "my", "get", "find", "buy", "please", "would", "like",
+  "searching", "search", "show", "new", "pair", "pairs", "of", "good", "nice",
+]);
+
+const PRODUCT_NOUNS = new Set([
+  "shoe", "shoes", "footwear", "trainer", "trainers", "sneaker", "sneakers",
+  "boot", "boots", "cleat", "cleats", "item", "items", "product", "products",
+  "thing", "things", "something",
+]);
+
+export function hasStatedPurpose(text: string): boolean {
+  const words = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .filter((w) => !FILLER.has(w) && !PRODUCT_NOUNS.has(w));
+
+  // "sports shoes" is still generic; "tennis sports shoes" is not.
+  return words.filter((w) => w !== "sport" && w !== "sports").length > 0;
+}
+
 export function isFootwear(category: string | null, productQuery: string): boolean {
   if (category && FOOTWEAR_CATEGORIES.has(category.toLowerCase())) return true;
   return /\b(shoe|shoes|footwear|sneaker|sneakers|trainer|trainers|boot|boots|cleat|cleats|loafer|loafers|sandal|sandals)\b/i.test(
@@ -120,11 +155,7 @@ export function missingSlots(intent: ShoppingIntent): Slot[] {
   const attrs = intent.attributes;
   const query = intent.productQuery.toLowerCase();
 
-  const purposeKnown =
-    intent.category !== null ||
-    /\b(running|marathon|race|racing|trail|gym|training|lift|walk|walking|casual|sneaker|formal|office|wedding|football|soccer|basketball|cricket|hiking|hike|school|sandal|slide)\b/.test(
-      query,
-    );
+  const purposeKnown = intent.category !== null || hasStatedPurpose(query);
   if (!purposeKnown) {
     slots.push({
       id: "purpose",

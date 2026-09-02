@@ -15,6 +15,11 @@ const bodySchema = z.object({
   answered: z.array(z.string().max(40)).max(12).default([]),
   /** Set when the shopper asks to see results without further questions. */
   skipQuestions: z.boolean().default(false),
+  /** The shopper's own ordering of what matters, most important first. */
+  criteriaOrder: z
+    .array(z.enum(["price", "rating", "delivery", "returns", "reliability", "availability"]))
+    .max(6)
+    .default([]),
   /** The conversation so far, oldest first, excluding `message`. */
   history: z
     .array(
@@ -56,6 +61,7 @@ export async function POST(request: Request) {
       answered: parsed.data.answered as never,
       skipQuestions: parsed.data.skipQuestions,
       history: parsed.data.history,
+      criteriaOrder: parsed.data.criteriaOrder,
     });
     return NextResponse.json(toTurnDto(turn));
   } catch (cause) {

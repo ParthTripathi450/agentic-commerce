@@ -35,6 +35,71 @@ export const WEIGHT_PRESETS: Record<Priority, Weights> = {
 };
 
 /**
+ * The criteria a shopper may reorder, and what each one means to them.
+ *
+ * `relevance` is deliberately NOT in this list. It is not a preference — it is
+ * what keeps the ranking about the thing they asked for. Letting it be dragged
+ * to last would rank a cheap unrelated product above a matching one, which is
+ * the failure the relevance gate exists to prevent.
+ */
+export const SHOPPER_CRITERIA = [
+  "price",
+  "rating",
+  "delivery",
+  "returns",
+  "reliability",
+  "availability",
+] as const;
+
+export type ShopperCriterion = (typeof SHOPPER_CRITERIA)[number];
+
+export const CRITERION_LABELS: Record<ShopperCriterion, { label: string; hint: string }> = {
+  price: { label: "Price", hint: "Cheaper ranks higher" },
+  rating: { label: "Rating", hint: "Better reviewed, weighted by how many reviews" },
+  delivery: { label: "Delivery speed", hint: "Arrives sooner" },
+  returns: { label: "Return window", hint: "Longer and easier to send back" },
+  reliability: { label: "Seller reliability", hint: "Fulfils orders without problems" },
+  availability: { label: "Stock", hint: "More on hand, less chance of a cancellation" },
+};
+
+/** Share of the score reserved for matching the request itself. */
+const RELEVANCE_SHARE = 0.22;
+
+/**
+ * Turns a shopper's ordering into weights.
+ *
+ * Rank-proportional rather than winner-takes-all: the top choice matters most,
+ * but the rest still count, so reordering shifts the ranking without collapsing
+ * it to a single sort key. Anything the shopper omits keeps its place at the
+ * end, so a partial order is still a valid one.
+ */
+export function weightsFromOrder(order: ShopperCriterion[]): Weights {
+  const seen = new Set<ShopperCriterion>();
+  const ordered: ShopperCriterion[] = [];
+  for (const key of order) {
+    if (SHOPPER_CRITERIA.includes(key) && !seen.has(key)) {
+      seen.add(key);
+      ordered.push(key);
+    }
+  }
+  for (const key of SHOPPER_CRITERIA) if (!seen.has(key)) ordered.push(key);
+
+  const n = ordered.length;
+  const total = (n * (n + 1)) / 2;
+
+  const weights = { relevance: RELEVANCE_SHARE } as Weights;
+  ordered.forEach((key, index) => {
+    weights[key] = ((n - index) / total) * (1 - RELEVANCE_SHARE);
+  });
+  return weights;
+}
+
+/** The order a preset implies, for showing the shopper where they are starting. */
+export function orderFromWeights(weights: Weights): ShopperCriterion[] {
+  return [...SHOPPER_CRITERIA].sort((a, b) => weights[b] - weights[a]);
+}
+
+/**
  * Reviews required before a rating is trusted at face value.
  *
  * Below this, the score is pulled toward the catalog average in proportion to

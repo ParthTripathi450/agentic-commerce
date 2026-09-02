@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { shoppingIntentSchema, type ShoppingIntent } from "./intent-schema";
 import {
   applyAnswer,
+  hasStatedPurpose,
   isFootwear,
   isTooBroad,
   MAX_QUESTIONS,
@@ -144,5 +145,28 @@ describe("applyAnswer", () => {
   it("a skipped answer changes nothing — silence is not a constraint", () => {
     expect(applyAnswer("shoes", "color", "")).toBe("shoes");
     expect(applyAnswer("shoes", "budget", "   ")).toBe("shoes");
+  });
+});
+
+
+describe("hasStatedPurpose", () => {
+  it("recognises a sport the rules were never told about", () => {
+    // The old version enumerated running/football/hiking and so asked "what
+    // will you use them for?" at someone who had just said "tennis shoes".
+    for (const text of [
+      "am looking for some tennis sports shoes",
+      "badminton shoes",
+      "squash shoes",
+      "golf shoes",
+      "shoes for my wedding",
+    ]) {
+      expect(hasStatedPurpose(text)).toBe(true);
+    }
+  });
+
+  it("still treats a bare product request as unqualified", () => {
+    for (const text of ["shoes", "i want shoes", "looking for a pair of shoes", "i need some sports shoes"]) {
+      expect(hasStatedPurpose(text)).toBe(false);
+    }
   });
 });

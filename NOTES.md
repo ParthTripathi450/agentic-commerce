@@ -228,6 +228,16 @@ is rule-parsed rather than empty.
 
 **Autonomous mode passes `skipQuestions: true`** — nobody is at the keyboard to answer.
 
+### Shopper-controlled ranking (`ranker.ts` + `priority-editor.tsx`)
+The weights are **shown, not hidden** — a ranking whose priorities are invisible cannot be argued
+with. `SHOPPER_CRITERIA` (price, rating, delivery, returns, reliability, availability) can be
+reordered by drag OR by up/down buttons; the buttons are the real control, since drag-and-drop is
+unusable by keyboard. `weightsFromOrder()` is rank-proportional, so reordering shifts the ranking
+without collapsing it into a single sort key, and a partial order is still valid.
+**`relevance` is not in the list** — it is not a preference, it is what keeps results about the
+thing that was asked for. A reorder replays the query rather than re-sorting client-side, so the
+score breakdown and explanation are regenerated from the new weights.
+
 ### Selling a substitute (`server/agents/customer/alternatives.ts`)
 **The agent's job is to sell**, so an empty result is a lost sale — but only one kind of empty
 result may be recovered:
@@ -374,6 +384,11 @@ never silently dropped from a combined total.
     threw away an entire good understanding because the model wrote a chatty `productType`, and the
     turn silently fell back to pattern matching with no error anywhere. Caps on model text are
     sanity bounds, not correctness requirements.
+21. **Do not detect intent by enumerating a domain.** The fallback decided "purpose is known" from
+    a list of sports, so it asked "what will you use them for?" at someone who had said *tennis
+    shoes* — and would have done the same for badminton, squash and golf. `hasStatedPurpose()`
+    instead strips filler and the product noun and asks whether ANYTHING is left. Prefer a rule
+    about the shape of the sentence over a list of the words you thought of.
 
 
 

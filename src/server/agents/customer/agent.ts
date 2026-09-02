@@ -15,7 +15,14 @@ import { explainSelection, type Explanation } from "./explain";
 import { intentToQuery } from "./intent";
 import { MAX_TURNS } from "./conversation";
 import type { ShoppingIntent } from "./intent-schema";
-import { rankCandidates, type RankingResult } from "./ranker";
+import {
+  rankCandidates,
+  orderFromWeights,
+  weightsFromOrder,
+  WEIGHT_PRESETS,
+  type RankingResult,
+  type ShopperCriterion,
+} from "./ranker";
 
 /**
  * The customer shopping agent: UNDERSTAND → SEARCH → RANK → EXPLAIN.
@@ -67,6 +74,8 @@ export type ShoppingTurn = {
   alternatives: Alternative[];
   /** Constraints set aside to find those alternatives. */
   alternativesDropped: string[];
+  /** What the ranking weighted, most important first — shown so it can be changed. */
+  criteriaOrder: ShopperCriterion[];
   /** Slots answered so far, so the next turn does not repeat itself. */
   answered: SlotId[];
   /** What the agent currently believes, so the shopper can correct it. */
@@ -170,6 +179,13 @@ export async function runShoppingTurn(input: {
   history?: ConversationTurn[];
   /** Set when the shopper explicitly asked to stop being questioned. */
   skipQuestions?: boolean;
+  /**
+   * The shopper's own ordering of what matters, most important first.
+   *
+   * Overrides the preset weights. Omitted means "use the preset the request
+   * implied", which is what most shoppers will never need to change.
+   */
+  criteriaOrder?: ShopperCriterion[];
 }): Promise<ShoppingTurn> {
   const sessionId =
     input.sessionId ??
@@ -264,6 +280,9 @@ export async function runShoppingTurn(input: {
       question: null,
       alternatives: [],
       alternativesDropped: [],
+      criteriaOrder: input.criteriaOrder?.length
+        ? input.criteriaOrder
+        : orderFromWeights(WEIGHT_PRESETS[intent.priority]),
       answered,
       known: describeKnown(intent),
       degraded,
@@ -389,6 +408,9 @@ export async function runShoppingTurn(input: {
       },
       alternatives: [],
       alternativesDropped: [],
+      criteriaOrder: input.criteriaOrder?.length
+        ? input.criteriaOrder
+        : orderFromWeights(WEIGHT_PRESETS[intent.priority]),
       answered,
       known: understandingSummary(understanding.slots),
       degraded,
@@ -495,6 +517,9 @@ export async function runShoppingTurn(input: {
         question: null,
         alternatives,
         alternativesDropped: dropped,
+        criteriaOrder: input.criteriaOrder?.length
+          ? input.criteriaOrder
+          : orderFromWeights(WEIGHT_PRESETS[intent.priority]),
         answered,
         known: describeKnown(intent),
         degraded,
@@ -528,6 +553,9 @@ export async function runShoppingTurn(input: {
       question: null,
       alternatives: [],
       alternativesDropped: [],
+      criteriaOrder: input.criteriaOrder?.length
+        ? input.criteriaOrder
+        : orderFromWeights(WEIGHT_PRESETS[intent.priority]),
       answered,
       known: describeKnown(intent),
       degraded,
@@ -536,12 +564,18 @@ export async function runShoppingTurn(input: {
 
   // ----------------------------------------------------------------- RANK
   const rankStartedAt = Date.now();
+  // A shopper's explicit ordering beats the preset the wording implied — they
+  // said it outright, the preset was inferred.
   const ranking = rankCandidates(search.candidates, {
     priority: intent.priority,
     budgetMinor: intent.priceMaxMinor,
+    weights: input.criteriaOrder?.length ? weightsFromOrder(input.criteriaOrder) : undefined,
     rejected: search.rejected,
     limit: input.limit ?? 5,
   });
+  const criteriaOrder = input.criteriaOrder?.length
+    ? input.criteriaOrder
+    : orderFromWeights(WEIGHT_PRESETS[intent.priority]);
 
   await recordAndAdvance(
     sessionId,
@@ -605,6 +639,7 @@ export async function runShoppingTurn(input: {
     outcome: "results",
     message: null,
     question: null,
+    criteriaOrder,
     alternatives: [],
     alternativesDropped: [],
     answered,

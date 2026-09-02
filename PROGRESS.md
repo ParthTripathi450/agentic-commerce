@@ -3,7 +3,7 @@
 Read `NOTES.md` first for architecture and conventions. This file is the state snapshot.
 
 **Last updated:** 2026-09-02
-**Health:** 206 tests passing (25 files) · 0 lint issues · production build clean ·
+**Health:** 218 tests passing (26 files) · 0 lint issues · production build clean ·
 40 route files · 32 tables
 **Git:** pushed to `origin/main`
 **Repo:** https://github.com/ParthTripathi450/agentic-commerce-platform (private)
@@ -168,6 +168,18 @@ cap was hit during testing. `GROQ_FAST_MODEL=openai/gpt-oss-20b` now serves conv
 fewer tokens and a separate daily pool. Groq's catalogue had rotated again (§8.6) — no
 `llama-3.1-8b-instant`; `gpt-oss-20b` and `qwen3.x-27b` are what is available.
 **Groq is the only configured provider — a `GEMINI_API_KEY` would give real failover.**
+
+### Ranking priorities, and four fixes from testing
+- **"tennis sports shoes" was still asked "what will you use them for?"** The degraded fallback
+  decided purpose from a LIST of sports with no tennis in it. `hasStatedPurpose()` now strips
+  filler and the product noun and asks whether anything remains — so badminton, squash and golf
+  work too, without anyone having to think of them.
+- **Ranking priorities are now visible and reorderable.** Price › Rating › Delivery … shown with
+  the real percentages, reorderable by drag or arrows. Verified: Price-first returns the ₹3,299
+  shoe, Rating-first promotes the 4.8-rated ₹6,041 one. `relevance` is deliberately not offered.
+- **Recommendation cards are clickable** — image and title link to `/product/[id]`. So do result
+  titles.
+- **Price tracks quantity** on the product page and result cards ("2 × ₹4,299 each").
 
 ### Cart correctness, product pages and cross-sell
 Two genuine cart bugs, both from there being TWO routes into the basket:

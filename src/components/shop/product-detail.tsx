@@ -56,14 +56,23 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
       <div className="space-y-4">
         <Card>
           <CardBody className="space-y-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="tabular text-2xl font-semibold">
-                {variant ? formatMoney(variant.priceMinor, variant.currency) : "—"}
-              </span>
-              {variant?.compareAtPriceMinor ? (
-                <span className="tabular text-sm text-muted-foreground line-through">
-                  {formatMoney(variant.compareAtPriceMinor, variant.currency)}
+            <div className="space-y-0.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                {/* The figure tracks quantity: a price that ignores the stepper
+                    is the number the shopper is actually deciding on, wrong. */}
+                <span className="tabular text-2xl font-semibold">
+                  {variant ? formatMoney(variant.priceMinor * quantity, variant.currency) : "—"}
                 </span>
+                {variant?.compareAtPriceMinor ? (
+                  <span className="tabular text-sm text-muted-foreground line-through">
+                    {formatMoney(variant.compareAtPriceMinor * quantity, variant.currency)}
+                  </span>
+                ) : null}
+              </div>
+              {variant && quantity > 1 ? (
+                <p className="text-xs text-muted-foreground">
+                  {quantity} × {formatMoney(variant.priceMinor, variant.currency)} each
+                </p>
               ) : null}
             </div>
 

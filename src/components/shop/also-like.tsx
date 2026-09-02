@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ShoppingCart } from "lucide-react";
 import { Badge, Button, Card, CardBody } from "@/components/ui";
@@ -82,14 +83,23 @@ function RecommendationCard({ item }: { item: Recommendation }) {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="flex gap-3 rounded-lg border border-border p-3">
-      <div className="relative size-16 shrink-0 overflow-hidden rounded-md bg-surface-2">
+    <div className="flex gap-3 rounded-lg border border-border p-3 transition-colors hover:border-primary/40">
+      {/* The whole card is a link: a recommendation you cannot open is a dead end. */}
+      <Link
+        href={`/product/${item.productId}`}
+        className="relative size-16 shrink-0 overflow-hidden rounded-md bg-surface-2"
+        aria-label={`View ${item.title}`}
+      >
         {item.imageUrl ? (
           <Image src={item.imageUrl} alt="" fill sizes="64px" className="object-cover" />
         ) : null}
-      </div>
+      </Link>
       <div className="min-w-0 flex-1 space-y-1.5">
-        <p className="truncate text-sm font-medium">{item.title}</p>
+        <Link href={`/product/${item.productId}`} className="block">
+          <p className="truncate text-sm font-medium hover:text-primary hover:underline">
+            {item.title}
+          </p>
+        </Link>
         <p className="text-xs text-muted-foreground">{item.merchantName}</p>
         <Badge tone="neutral">{item.reason}</Badge>
         <div className="flex items-center justify-between gap-2 pt-0.5">
