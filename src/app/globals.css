@@ -1,0 +1,272 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens.
+ *
+ * One palette drives both shadcn's variable contract (--background, --primary,
+ * --sidebar-*, …) and the handful of extra roles this app needs (soft status
+ * fills, chart series). Defining them together keeps a shadcn component and a
+ * hand-written one visually identical.
+ *
+ * Layout follows the reference: a dark persistent sidebar against a light
+ * content surface, with violet as the single accent.
+ */
+:root {
+  /* Tell the browser this is a light UI, so it does not dark-style native
+     controls, scrollbars and autofill on an OS set to dark mode. */
+  color-scheme: light;
+  --radius: 0.625rem;
+
+  /* Surfaces — a light grey ground so white cards read as distinct surfaces
+     rather than camouflaging into the page. */
+  --background: #f7f8fa;
+  --foreground: #14141b;
+  --card: #ffffff;
+  --card-foreground: #14141b;
+  --popover: #ffffff;
+  --popover-foreground: #14141b;
+
+  /* Violet accent */
+  --primary: #7f56d9;
+  --primary-foreground: #ffffff;
+  --primary-hover: #6941c6;
+  --primary-soft: #f4f0fe;
+
+  --secondary: #f2f2f5;
+  --secondary-foreground: #14141b;
+  --muted: #f2f2f5;
+  --muted-foreground: #475467;
+  --accent: #f4f0fe;
+  --accent-foreground: #5b34ab;
+  --destructive: #d03b3b;
+  --destructive-foreground: #ffffff;
+
+  --border: #e5e5ea;
+  --input: #d9d9e0;
+  --ring: #7f56d9;
+
+  /* Dark sidebar against the light content area */
+  --sidebar: #101828;
+  --sidebar-foreground: #e8eaf0;
+  --sidebar-primary: #7f56d9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1d2739;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #1d2739;
+  --sidebar-ring: #7f56d9;
+  --sidebar-muted: #94a0b8;
+
+  /* Extra roles this app needs beyond shadcn's set */
+  --surface-2: #f2f2f5;
+  /* 4.97:1 on white. The previous #8a8a97 measured 3.41:1 — below the 4.5:1
+     body-text floor, which is what made copy look washed out. */
+  --text-subtle: #667085;
+  --success: #067647;
+  --success-soft: #ecfdf3;
+  --warning: #b54708;
+  --warning-soft: #fffaeb;
+  --danger: #b42318;
+  --danger-soft: #fef3f2;
+  --info: #175cd3;
+  --info-soft: #eff8ff;
+
+  /* Best-match highlight and the autonomous-mode call to action. */
+  --best-match: #e4da72;
+  --agent-cta: #3e0f8d;
+  --agent-cta-hover: #310a72;
+
+  /* Validated chart palette (see docs/PLAN.md) */
+  --chart-1: #7f56d9;
+  --chart-2: #2a78d6;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+
+  --shadow-xs: 0 1px 2px rgb(16 24 40 / 0.05);
+  --shadow-sm: 0 1px 3px rgb(16 24 40 / 0.10), 0 1px 2px rgb(16 24 40 / 0.06);
+  --shadow-md: 0 4px 8px -2px rgb(16 24 40 / 0.10), 0 2px 4px -2px rgb(16 24 40 / 0.06);
+  --shadow-lg: 0 12px 16px -4px rgb(16 24 40 / 0.08), 0 4px 6px -2px rgb(16 24 40 / 0.03);
+  --shadow-xl: 0 20px 24px -4px rgb(16 24 40 / 0.10), 0 8px 8px -4px rgb(16 24 40 / 0.04);
+  /* Auth pages sit on a tinted ground so the form card can lift off it. */
+  --auth-bg: #f7f8fa;
+}
+
+/*
+ * Dark theme — opt-in only.
+ *
+ * Applied when something stamps .dark on the root, never from the OS setting.
+ * This product's design is the light one: a dark sidebar against a white
+ * content area. Following prefers-color-scheme turned the whole page black on
+ * any machine set to dark mode, which is not the design.
+ */
+.dark,
+:root:not([data-theme="light"]):is(.dark) {
+  color-scheme: dark;
+  --background: #0c0d12;
+  --foreground: #f0f0f4;
+  --card: #14161d;
+  --card-foreground: #f0f0f4;
+  --popover: #14161d;
+  --popover-foreground: #f0f0f4;
+
+  --primary: #9e77ed;
+  --primary-foreground: #14141b;
+  --primary-hover: #b692f6;
+  --primary-soft: #211a35;
+
+  --secondary: #1c1f27;
+  --secondary-foreground: #f0f0f4;
+  --muted: #1c1f27;
+  --muted-foreground: #b6b9c4;
+  --accent: #211a35;
+  --accent-foreground: #d6bbfb;
+  --destructive: #f97066;
+  --destructive-foreground: #14141b;
+
+  --border: #262a33;
+  --input: #343a46;
+  --ring: #9e77ed;
+
+  --sidebar: #0a0b0f;
+  --sidebar-foreground: #e8eaf0;
+  --sidebar-accent: #191d27;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #191d27;
+  --sidebar-muted: #8b93a5;
+
+  --surface-2: #1c1f27;
+  --text-subtle: #949aa8;
+  --success: #75e0a7;
+  --success-soft: #0a2b1c;
+  --warning: #fec84b;
+  --warning-soft: #2e2008;
+  --danger: #fda29b;
+  --danger-soft: #2f1512;
+  --info: #84caff;
+  --info-soft: #0b2545;
+
+  --chart-1: #9e77ed;
+  --chart-2: #3987e5;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-muted: var(--sidebar-muted);
+
+  --color-surface-2: var(--surface-2);
+  --color-subtle: var(--text-subtle);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --color-best-match: var(--best-match);
+  --color-agent-cta: var(--agent-cta);
+  --color-agent-cta-hover: var(--agent-cta-hover);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /*
+     * Deliberately NOT -webkit-font-smoothing: antialiased. On macOS that
+     * thins every glyph, which reads as faded text rather than as refinement.
+     * The platform default is heavier and holds up better on white.
+     */
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/*
+ * Card elevation and hover lift live in the Card component's own utility
+ * classes, NOT here.
+ *
+ * Tailwind compiles `ring-*` into box-shadow, so declaring box-shadow in plain
+ * CSS silently erases every ring — including the accent ring on the agent's top
+ * pick. Utilities compose correctly; a raw declaration does not.
+ */
+
+/* Tabular figures keep money and metrics from jittering as they update. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.28s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
