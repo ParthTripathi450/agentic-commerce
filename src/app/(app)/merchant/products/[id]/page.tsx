@@ -5,6 +5,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui";
 import { ProductForm, VariantRow } from "@/components/merchant/product-forms";
 import { AddVariantForm } from "@/components/merchant/variant-manager";
 import { ProductImages } from "@/components/merchant/product-images";
+import { ProductTags } from "@/components/merchant/product-tags";
 import { db } from "@/db";
 import { availabilityWindows, catalogDocuments, inventory, productVariants, products } from "@/db/schema";
 import { requireMerchant } from "@/lib/session";
@@ -70,6 +71,8 @@ export default async function ProductDetail({ params }: { params: Promise<{ id: 
           attributeLines: await formatAttributeLines(product.attributes),
         }}
       />
+
+      <ProductTags productId={product.id} initialTags={product.searchTags ?? []} />
 
       <ProductImages productId={product.id} imageUrls={product.imageUrls} />
 

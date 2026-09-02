@@ -62,6 +62,7 @@ async function loadInputs(productIds?: string[]) {
         attributes: product.attributes,
         ratingBp: product.ratingBp,
         ratingCount: product.ratingCount,
+        searchTags: product.searchTags ?? [],
       },
       merchant: {
         name: merchant.name,
@@ -136,6 +137,9 @@ export async function indexCatalog(options?: {
           productId: entry.input.product.id,
           merchantId: entry.merchantId,
           aiText: entry.aiText,
+          // Stored apart so the generated vector can weight them above the body.
+          titleText: entry.input.product.title,
+          tagsText: entry.input.product.searchTags.join(", "),
           embedding: vectors[idx],
           sourceHash: entry.hash,
           embeddedAt: new Date(),
@@ -145,6 +149,8 @@ export async function indexCatalog(options?: {
         target: catalogDocuments.productId,
         set: {
           aiText: sql`excluded.ai_text`,
+          titleText: sql`excluded.title_text`,
+          tagsText: sql`excluded.tags_text`,
           embedding: sql`excluded.embedding`,
           sourceHash: sql`excluded.source_hash`,
           embeddedAt: sql`excluded.embedded_at`,

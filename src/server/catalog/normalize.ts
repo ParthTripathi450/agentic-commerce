@@ -23,6 +23,8 @@ export type NormalizerInput = {
     attributes: Record<string, unknown>;
     ratingBp: number | null;
     ratingCount: number;
+    /** Merchant-owned search tags, weighted above the body in the index. */
+    searchTags: string[];
   };
   merchant: { name: string; slug: string; description: string | null };
   policies: {
@@ -106,6 +108,12 @@ export function buildAiText(input: NormalizerInput): string {
     .join("; ");
   if (attrText) lines.push(`Specifications — ${attrText}.`);
 
+  // Tags join the embedded text too: phrases like "marathon training" carry
+  // real semantic signal that the description may not spell out.
+  if (product.searchTags.length > 0) {
+    lines.push(`Also known for — ${product.searchTags.join(", ")}.`);
+  }
+
   if (product.ratingBp && product.ratingCount > 0) {
     lines.push(
       `Rated ${(product.ratingBp / 1000).toFixed(1)} out of 5 from ${product.ratingCount} reviews.`,
@@ -140,6 +148,7 @@ export function sourceHash(input: NormalizerInput): string {
       a: input.product.attributes,
       r: input.product.ratingBp,
       rc: input.product.ratingCount,
+      tg: input.product.searchTags,
     },
     m: input.merchant,
     pol: input.policies,

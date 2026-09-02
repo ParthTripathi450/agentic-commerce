@@ -32,6 +32,15 @@ export const products = pgTable(
     /** Free-form structured facts: material, gender, care, features[] … */
     attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
     imageUrls: jsonb("image_urls").$type<string[]>().notNull().default([]),
+    /**
+     * Internal search tags.
+     *
+     * Weighted ABOVE the description in the search vector, so a tag match beats
+     * a body match. Kept in their own column rather than stuffed into the
+     * description: shoppers read the description, and padding it with keywords
+     * would degrade both what they see and what the embedder encodes.
+     */
+    searchTags: jsonb("search_tags").$type<string[]>().notNull().default([]),
     status: productStatus("status").notNull().default("active"),
     ratingBp: integer("rating_bp"),
     ratingCount: integer("rating_count").notNull().default(0),
@@ -117,9 +126,20 @@ export const catalogDocuments = pgTable(
       .notNull()
       .references(() => merchants.id, { onDelete: "cascade" }),
     aiText: text("ai_text").notNull(),
+    /** Title and tags, held apart so they can carry weight 'A'. */
+    titleText: text("title_text").notNull().default(""),
+    tagsText: text("tags_text").notNull().default(""),
     embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }),
+    /**
+     * Weighted full-text vector.
+     *
+     * ts_rank scores weight 'A' at 1.0 and 'B' at 0.4, so a query term matching
+     * the title or a tag outranks the same term appearing in the body copy.
+     */
     searchVector: tsvector("search_vector").generatedAlwaysAs(
-      sql`to_tsvector('english', ai_text)`,
+      sql`setweight(to_tsvector('english', coalesce(title_text, '')), 'A')
+       || setweight(to_tsvector('english', coalesce(tags_text, '')), 'A')
+       || setweight(to_tsvector('english', ai_text), 'B')`,
     ),
     /** Hash of the source data; lets the pipeline skip unchanged products. */
     sourceHash: varchar("source_hash", { length: 64 }).notNull(),
