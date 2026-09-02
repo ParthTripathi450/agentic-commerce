@@ -68,6 +68,11 @@ describe("category is a fact, not a guess", () => {
     // "yoga mat" is not a category (mats live in Fitness Accessories). Inferring
     // one here removed every yoga mat and surfaced t-shirts instead.
     expect(parseIntentWithRules("a yoga mat under 2000", vocabulary).category).toBeNull();
-    expect(parseIntentWithRules("noise cancelling headphones", vocabulary).category).toBeNull();
+
+    // "headphones" IS a category and the shopper said it, so matching is grounded
+    // — the rule keys off words actually present, not on the model guessing.
+    expect(parseIntentWithRules("noise cancelling headphones", vocabulary).category).toBe(
+      "Headphones",
+    );
   });
 });
