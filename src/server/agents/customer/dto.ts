@@ -33,8 +33,25 @@ export type OptionDto = {
 
 export type TurnDto = {
   sessionId: string;
-  outcome: "results" | "no_results" | "needs_clarification";
+  outcome: "results" | "no_results" | "needs_clarification" | "asking";
   message: string | null;
+  /**
+   * The question the agent is waiting on, when `outcome === "asking"`.
+   *
+   * Options are catalogue-derived quick replies; the shopper can always answer
+   * in free text instead, which goes back through the same intent parser.
+   */
+  question: {
+    id: string;
+    question: string;
+    rationale: string;
+    skippable: boolean;
+    options: { label: string; value: string }[];
+  } | null;
+  /** Slots already answered, echoed back so the client can return them. */
+  answered: string[];
+  /** What the agent believes so far, so the shopper can correct it. */
+  known: string[];
   narrative: string | null;
   /** Short scannable reasons, generated from the score vector. */
   points: string[];
@@ -66,6 +83,17 @@ export function toTurnDto(turn: ShoppingTurn): TurnDto {
     sessionId: turn.sessionId,
     outcome: turn.outcome,
     message: turn.message,
+    question: turn.question
+      ? {
+          id: turn.question.id,
+          question: turn.question.question,
+          rationale: turn.question.rationale,
+          skippable: turn.question.skippable,
+          options: turn.question.options,
+        }
+      : null,
+    answered: turn.answered,
+    known: turn.known,
     narrative: turn.explanation?.narrative ?? null,
     points: turn.explanation?.points ?? [],
     intent: {

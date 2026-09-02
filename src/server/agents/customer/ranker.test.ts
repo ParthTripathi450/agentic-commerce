@@ -51,16 +51,30 @@ describe("rankCandidates", () => {
 
   it("a stated priority visibly changes the winner", async () => {
     const { candidates } = await hybridSearch(QUERY);
+    const balanced = rankCandidates(candidates, { priority: "balanced", budgetMinor: 500000 });
     const cheapest = rankCandidates(candidates, { priority: "cheapest", budgetMinor: 500000 });
     const flexible = rankCandidates(candidates, { priority: "most_flexible", budgetMinor: 500000 });
 
-    const cheapestPrice = cheapest.ranked[0].candidate.variant.priceMinor;
-    const allPrices = candidates.map((c) => c.variant.priceMinor);
-    expect(cheapestPrice).toBe(Math.min(...allPrices));
+    /*
+     * Asserts the shift each preset promises, NOT a global optimum.
+     *
+     * `cheapest` weights price at 0.58, not 1.0 — the other 42% (relevance,
+     * availability, rating) can still outrank a small price gap, by design. An
+     * earlier version of this test asserted the absolute cheapest candidate
+     * always won, which only held while the catalogue was small enough for the
+     * price spread to dominate everything else.
+     */
+    expect(cheapest.ranked[0].candidate.variant.priceMinor).toBeLessThanOrEqual(
+      balanced.ranked[0].candidate.variant.priceMinor,
+    );
+    expect(flexible.ranked[0].candidate.policies.returnWindowDays).toBeGreaterThanOrEqual(
+      balanced.ranked[0].candidate.policies.returnWindowDays,
+    );
 
-    // Prioritising returns should favour the longest return window available.
-    const bestReturns = Math.max(...candidates.map((c) => c.policies.returnWindowDays));
-    expect(flexible.ranked[0].candidate.policies.returnWindowDays).toBe(bestReturns);
+    // And price really is the criterion doing the work under `cheapest`.
+    const priceCriterion = cheapest.ranked[0].criteria.find((c) => c.name === "price");
+    const maxContribution = Math.max(...cheapest.ranked[0].criteria.map((c) => c.contribution));
+    expect(priceCriterion?.contribution).toBe(maxContribution);
   });
 
   it("carries forward the reason each filtered product was excluded", async () => {

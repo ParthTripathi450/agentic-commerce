@@ -103,8 +103,19 @@ export async function parseIntent(message: string): Promise<ParsedIntent> {
      * request, which silently widens the search to products nobody can buy.
      */
     requireInStock: rules.requireInStock,
-    // The vague-plural check is deterministic, so it overrides the model.
-    clarificationNeeded: rules.clarificationNeeded ?? value.clarificationNeeded,
+    /*
+     * Clarification is rule-owned too, and for the same reason as category.
+     *
+     * The model was answering "I want shoes" with "How many shoes do you
+     * need?" — a pair is obviously one, and that question hijacked the turn
+     * before the slot-filling in `clarify.ts` could ask something useful.
+     * The model's own wording is kept ONLY when the request names no product
+     * at all, which is the one case rules cannot resolve; vagueness about
+     * WHICH product is now handled by asking, not by blocking.
+     */
+    clarificationNeeded:
+      rules.clarificationNeeded ??
+      (value.productQuery.trim().length === 0 ? value.clarificationNeeded : null),
     quantityStated: (value.quantityStated || rules.quantityStated) && value.quantity !== 0,
     // 0 means "unstated"; searching still needs a concrete number.
     quantity: value.quantity === 0 ? 1 : value.quantity,

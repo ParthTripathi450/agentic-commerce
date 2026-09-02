@@ -19,7 +19,8 @@
     "doctor": "tsx --env-file=.env.local src/scripts/doctor.ts",
     "mcp:stdio": "tsx --env-file=.env.local src/scripts/mcp-stdio.ts",
     "catalog:images": "tsx --env-file=.env.local src/scripts/generate-images.ts",
-    "db:seed-extra": "tsx --env-file=.env.local src/db/seed-extra.ts"
+    "db:seed-extra": "tsx --env-file=.env.local src/db/seed-extra.ts",
+    "db:seed-shoes": "tsx --env-file=.env.local src/db/seed-shoes.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",

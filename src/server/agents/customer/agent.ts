@@ -1,6 +1,7 @@
 import { formatMoney } from "@/lib/money";
 import { hybridSearch, type SearchResult, type StructuredQuery } from "@/server/catalog/search";
 import { record, recordAndAdvance, startSession } from "@/server/audit/recorder";
+import { nextQuestion, describeKnown, type Slot, type SlotId } from "./clarify";
 import { explainSelection, type Explanation } from "./explain";
 import { intentToQuery, parseIntent } from "./intent";
 import type { ShoppingIntent } from "./intent-schema";
@@ -30,9 +31,20 @@ export type ShoppingTurn = {
   stats: SearchResult["stats"];
   /** Constraints the agent loosened, and what it loosened them to. */
   relaxations: Relaxation[];
-  outcome: "results" | "no_results" | "needs_clarification";
+  outcome: "results" | "no_results" | "needs_clarification" | "asking";
   /** Message shown to the shopper when there is nothing to rank. */
   message: string | null;
+  /**
+   * The question the agent wants answered before it searches.
+   *
+   * Present only when `outcome === "asking"`. Chosen by rules in `clarify.ts`,
+   * never by the model — see the note there.
+   */
+  question: Slot | null;
+  /** Slots answered so far, so the next turn does not repeat itself. */
+  answered: SlotId[];
+  /** What the agent currently believes, so the shopper can correct it. */
+  known: string[];
   /** True when answers came from deterministic rules, not a model. */
   degraded: boolean;
 };
@@ -121,6 +133,10 @@ export async function runShoppingTurn(input: {
   sessionId?: string;
   excludeMerchantIds?: string[];
   limit?: number;
+  /** Slots the shopper has already answered in this conversation. */
+  answered?: SlotId[];
+  /** Set when the shopper explicitly asked to stop being questioned. */
+  skipQuestions?: boolean;
 }): Promise<ShoppingTurn> {
   const sessionId =
     input.sessionId ??
@@ -129,6 +145,8 @@ export async function runShoppingTurn(input: {
       kind: "customer",
       title: input.message.slice(0, 200),
     })).id;
+
+  const answered = input.answered ?? [];
 
   // ---------------------------------------------------------- UNDERSTAND
   const understandStartedAt = Date.now();
@@ -177,8 +195,51 @@ export async function runShoppingTurn(input: {
       relaxations: [],
       outcome: "needs_clarification",
       message: intent.clarificationNeeded,
+      question: null,
+      answered,
+      known: describeKnown(intent),
       degraded,
     };
+  }
+
+  // ------------------------------------------------------------------ ASK
+  //
+  // Before searching: is the request specific enough to rank honestly? A bare
+  // "shoes" matches most of the catalogue, so ranking it would be arbitrary
+  // dressed as advice. Ask instead — and ask only about slots the RULES say
+  // are missing, so the agent cannot invent a constraint.
+  if (!input.skipQuestions) {
+    const decision = nextQuestion(intent, answered);
+    if (decision.ask) {
+      await record(sessionId, {
+        step: "SEARCH",
+        observation: {
+          summary: `Search deferred — "${intent.productQuery}" is too broad to rank honestly.`,
+          inputs: { productQuery: intent.productQuery, answered },
+        },
+        reasoning: {
+          summary: `Asking about ${decision.slot.id} rather than guessing it.`,
+          narrative: decision.slot.rationale,
+        },
+        action: { type: "ask_question", params: { slot: decision.slot.id } },
+        outcome: { status: "blocked", detail: decision.slot.question },
+      });
+
+      return {
+        sessionId,
+        intent,
+        ranking: { ranked: [], weights: {} as never, priority: intent.priority, rejectedAlternatives: [] },
+        explanation: null,
+        stats: { recalled: 0, considered: 0, accepted: 0, merchantsSearched: 0, durationMs: 0, topRelevance: 0 },
+        relaxations: [],
+        outcome: "asking",
+        message: decision.slot.question,
+        question: decision.slot,
+        answered,
+        known: describeKnown(intent),
+        degraded,
+      };
+    }
   }
 
   // --------------------------------------------------------------- SEARCH
@@ -258,6 +319,9 @@ export async function runShoppingTurn(input: {
       relaxations,
       outcome: "no_results",
       message,
+      question: null,
+      answered,
+      known: describeKnown(intent),
       degraded,
     };
   }
@@ -332,6 +396,9 @@ export async function runShoppingTurn(input: {
     relaxations,
     outcome: "results",
     message: null,
+    question: null,
+    answered,
+    known: describeKnown(intent),
     degraded: degraded || explanation.meta.degraded,
   };
 }

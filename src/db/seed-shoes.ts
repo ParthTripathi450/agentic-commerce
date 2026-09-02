@@ -3,15 +3,14 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 import { applyExpansion } from "./expansion";
-import { EXTRA_MERCHANTS, EXTRA_PRODUCTS } from "./seed-extra-data";
+import { SHOE_MERCHANTS, SHOE_PRODUCTS } from "./seed-shoes-data";
 
 loadEnv({ path: ".env.local", quiet: true });
 
 /**
- * Additive marketplace expansion.
+ * Footwear depth, applied additively.
  *
- * The insert logic lives in `expansion.ts` because there is more than one
- * expansion seeder now; this file is just its data and reporting.
+ * Safe to re-run: existing merchants and products are skipped.
  */
 async function main() {
   const sqlClient = postgres(process.env.DATABASE_URL!, { max: 1 });
@@ -19,27 +18,30 @@ async function main() {
 
   const result = await applyExpansion({
     db,
-    merchants: EXTRA_MERCHANTS,
-    products: EXTRA_PRODUCTS,
-    orderPrefix: "ACX",
-    randomSeed: 20260902,
-    historyDays: 60,
+    merchants: SHOE_MERCHANTS,
+    products: SHOE_PRODUCTS,
+    orderPrefix: "ACF",
+    randomSeed: 20260903,
+    historyDays: 75,
   });
 
-  const [{ count: merchantCount }] = await sqlClient<{ count: string }[]>`SELECT count(*) FROM merchants`;
+  const [{ count: shoeCount }] = await sqlClient<{ count: string }[]>`
+    SELECT count(*) FROM products WHERE category IN (
+      'Running Shoes','Trail Shoes','Sneakers','Football Boots','Cricket Shoes',
+      'Basketball Shoes','Formal Shoes','Hiking Boots','Training Shoes',
+      'Walking Shoes','Kids Shoes','Sandals')`;
   const [{ count: productCount }] = await sqlClient<{ count: string }[]>`SELECT count(*) FROM products`;
-  const [{ count: categoryCount }] = await sqlClient<{ count: string }[]>`SELECT count(DISTINCT category) FROM products WHERE status='active'`;
 
   console.log(`
 added:
   merchants  ${result.merchantsAdded}
   products   ${result.productsAdded}
+  variants   ${result.variantsAdded}
   orders     ${result.ordersAdded}
 
 marketplace now:
-  merchants  ${merchantCount}
+  footwear   ${shoeCount}
   products   ${productCount}
-  categories ${categoryCount}
 
 next: npm run catalog:index && npm run catalog:images
 `);
