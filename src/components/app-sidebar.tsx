@@ -13,6 +13,7 @@ import {
   Network,
   Receipt,
   Search,
+  ShoppingCart,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -23,7 +24,13 @@ import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
-export type NavItem = { href: string; label: string; icon: keyof typeof ICONS };
+export type NavItem = {
+  href: string;
+  label: string;
+  icon: keyof typeof ICONS;
+  /** Rendered as a pill on the right of the row, e.g. a cart count. */
+  badge?: number;
+};
 
 const ICONS = {
   dashboard: LayoutDashboard,
@@ -37,6 +44,7 @@ const ICONS = {
   insights: Sparkles,
   protocols: Network,
   settings: Settings,
+  cart: ShoppingCart,
   support: LifeBuoy,
   store: Store,
 } satisfies Record<string, LucideIcon>;
@@ -98,6 +106,11 @@ export function AppSidebar({
         >
           <Icon className="size-4.5 shrink-0" strokeWidth={2} />
           <span className="truncate">{item.label}</span>
+          {item.badge ? (
+            <span className="tabular ml-auto rounded-full bg-sidebar-primary px-1.5 py-0.5 text-[11px] font-semibold text-sidebar-primary-foreground">
+              {item.badge}
+            </span>
+          ) : null}
         </Link>
       </li>
     );

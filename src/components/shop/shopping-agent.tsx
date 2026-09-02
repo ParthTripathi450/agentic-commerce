@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Image from "next/image";
-import { ChevronDown, ShieldCheck, Sparkles } from "lucide-react";
+import { ChevronDown, ShieldCheck, ShoppingCart, Sparkles } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody, Input } from "@/components/ui";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { OptionDto, TurnDto } from "@/server/agents/customer/dto";
 import { PurchaseFlow } from "./purchase-flow";
+import { QuantityStepper } from "@/components/cart/quantity-stepper";
+import { addToCartAction } from "@/server/commerce/cart-actions";
 import { AutonomousFlow } from "./autonomous-flow";
 import { FeaturedGrid } from "./featured-grid";
 import type { FeaturedProduct } from "@/server/catalog/featured";
@@ -175,7 +178,7 @@ function AgentProgress() {
 }
 
 function TurnView({ turn }: { turn: TurnDto }) {
-  const [buying, setBuying] = useState<OptionDto | null>(null);
+  const [buying, setBuying] = useState<{ option: OptionDto; quantity: number } | null>(null);
 
   if (turn.outcome !== "results") {
     return (
@@ -204,9 +207,10 @@ function TurnView({ turn }: { turn: TurnDto }) {
 
       {buying ? (
         <PurchaseFlow
-          key={buying.variantId}
-          variantId={buying.variantId}
-          productTitle={buying.title}
+          key={buying.option.variantId}
+          variantId={buying.option.variantId}
+          productTitle={buying.option.title}
+          quantity={buying.quantity}
           agentSessionId={turn.sessionId}
           intentText={turn.intent.productQuery}
           onClose={() => setBuying(null)}
@@ -219,8 +223,8 @@ function TurnView({ turn }: { turn: TurnDto }) {
             key={option.variantId}
             option={option}
             intent={turn.intent}
-            selected={buying?.variantId === option.variantId}
-            onSelect={() => setBuying(option)}
+            selected={buying?.option.variantId === option.variantId}
+            onSelect={(quantity) => setBuying({ option, quantity })}
           />
         ))}
       </div>
@@ -309,9 +313,13 @@ function OptionCard({
   option: OptionDto;
   intent: TurnDto["intent"];
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (quantity: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [quantity, setQuantity] = useState(1);
+  const [adding, startAdding] = useTransition();
+  const [addMessage, setAddMessage] = useState<string | null>(null);
+  const router = useRouter();
   const isTop = option.rank === 1;
   const maxContribution = Math.max(...option.criteria.map((c) => c.contribution), 0.0001);
 
@@ -388,23 +396,57 @@ function OptionCard({
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-          <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            className="text-xs font-medium text-primary hover:underline"
-            aria-expanded={open}
-          >
-            {open ? "Hide" : "Show"} score breakdown ({option.score.toFixed(3)})
-          </button>
-          <Button
-            size="sm"
-            variant={isTop ? "primary" : "secondary"}
-            onClick={onSelect}
-            disabled={selected}
-          >
-            {selected ? "Selected" : "Select"}
-          </Button>
+        <div className="space-y-3 border-t border-border pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <QuantityStepper
+              size="sm"
+              value={quantity}
+              max={option.availableQuantity}
+              onChange={setQuantity}
+            />
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={adding || option.availableQuantity === 0}
+                onClick={() =>
+                  startAdding(async () => {
+                    const form = new FormData();
+                    form.set("variantId", option.variantId);
+                    form.set("quantity", String(quantity));
+                    const result = await addToCartAction(null, form);
+                    setAddMessage(result?.error ?? result?.message ?? null);
+                    router.refresh();
+                  })
+                }
+              >
+                <ShoppingCart className="size-4" />
+                {adding ? "Adding…" : "Add to cart"}
+              </Button>
+
+              <Button
+                size="sm"
+                variant={isTop ? "primary" : "ghost"}
+                onClick={() => onSelect(quantity)}
+                disabled={selected || option.availableQuantity === 0}
+              >
+                {selected ? "Selected" : "Buy now"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen((value) => !value)}
+              className="text-xs font-medium text-primary hover:underline"
+              aria-expanded={open}
+            >
+              {open ? "Hide" : "Show"} score breakdown ({option.score.toFixed(3)})
+            </button>
+            {addMessage ? <span className="text-xs text-muted-foreground">{addMessage}</span> : null}
+          </div>
         </div>
 
         {open ? (

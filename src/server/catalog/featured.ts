@@ -69,3 +69,18 @@ export async function getFeaturedProducts(limit = 8): Promise<FeaturedProduct[]>
     unitsSold: Number(r.units),
   }));
 }
+
+/** Hero image per product, for carts and order lists. */
+export async function getProductImages(productIds: string[]): Promise<Map<string, string>> {
+  if (productIds.length === 0) return new Map();
+  const rows = (await db.execute<Record<string, unknown>>(sql`
+    SELECT id, image_urls FROM products
+    WHERE id IN (${sql.join(productIds.map((id) => sql`${id}`), sql`, `)})
+  `)) as unknown as Array<{ id: string; image_urls: string[] }>;
+
+  return new Map(
+    rows
+      .map((r) => [r.id, (r.image_urls ?? [])[0]] as const)
+      .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+  );
+}

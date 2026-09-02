@@ -63,6 +63,51 @@ describe("saved payment methods", () => {
     expect(Number(after.n)).toBe(Number(before.n));
   });
 
+  it("settles server-side even when Razorpay is the configured gateway", async () => {
+    // The bug this covers: with PAYMENT_GATEWAY=razorpay the saved-method path
+    // bailed out to the hosted widget, so the shopper still had to type card
+    // details after approving — defeating the point of saving a method.
+    process.env.PAYMENT_GATEWAY = "razorpay";
+    resetGatewayCache();
+
+    try {
+      await emptyOpenCarts(userId);
+      const proposal = await runAutonomousPurchase({
+        userId,
+        message: "Buy me black running shoes, size 10, under ₹5,000",
+      });
+      if (proposal.status !== "awaiting_authorization") throw new Error("expected a proposal");
+
+      const authorized = await authorizeCheckout({
+        userId,
+        approvalId: proposal.approvalId,
+        decision: "approve",
+        sessionId: proposal.sessionId,
+      });
+      if (authorized.status !== "authorized") throw new Error("expected authorization");
+
+      const { MockGateway } = await import("@/server/commerce/gateway");
+      const { confirmPayment } = await import("@/server/commerce/checkout");
+      const pid = "pay_saved_rzp_1";
+
+      // Explicit gateway instance — no global mutation, so a concurrent widget
+      // checkout would still correctly see Razorpay.
+      const confirmed = await confirmPayment({
+        userId,
+        orderId: authorized.orderId,
+        gatewayPaymentId: pid,
+        signature: MockGateway.sign(authorized.gatewayOrderId, pid),
+        gateway: new MockGateway(),
+      });
+
+      expect(confirmed.status).toBe("paid");
+      expect(process.env.PAYMENT_GATEWAY).toBe("razorpay"); // untouched
+    } finally {
+      process.env.PAYMENT_GATEWAY = "mock";
+      resetGatewayCache();
+    }
+  });
+
   it("completes the purchase once approved, with no further input", async () => {
     await emptyOpenCarts(userId);
     const proposal = await runAutonomousPurchase({

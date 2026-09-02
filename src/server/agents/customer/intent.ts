@@ -43,10 +43,15 @@ Rules:
     "black shoes under 5000"          -> priceMaxMinor 500000, priority "balanced"
     "the cheapest black shoes"        -> priceMaxMinor null,   priority "cheapest"
     "cheapest black shoes under 5000" -> priceMaxMinor 500000, priority "cheapest"
-- Set "clarificationNeeded" only if the request names no product at all.
+- "quantity": the number requested. Use 0 if they did not say — never invent one.
+- Set "quantityStated" true ONLY if the shopper gave an actual number ("2 pairs", "three units").
+- Set "clarificationNeeded" when the request names no product at all, OR when the shopper
+  implies more than one without saying how many ("a few", "some", "for my team"). Ask how many.
+  Do NOT quietly assume 1 in that case — that is a guess presented as an answer.
+  A plain singular request ("a yoga mat", "black running shoes") needs no clarification: 1 is correct.
 
 Reply with a single JSON object and nothing else:
-{"productQuery":string,"category":string|null,"brand":string|null,"attributes":object,"priceMaxMinor":number|null,"priceMinMinor":number|null,"quantity":number,"priority":string,"currency":"INR","requireInStock":boolean,"clarificationNeeded":string|null}`;
+{"productQuery":string,"category":string|null,"brand":string|null,"attributes":object,"priceMaxMinor":number|null,"priceMinMinor":number|null,"quantity":number,"quantityStated":boolean,"priority":string,"currency":"INR","requireInStock":boolean,"clarificationNeeded":string|null}`;
 }
 
 export type ParsedIntent = {
@@ -81,6 +86,22 @@ export async function parseIntent(message: string): Promise<ParsedIntent> {
     attributes: { ...rules.attributes, ...value.attributes },
     priceMaxMinor: value.priceMaxMinor ?? rules.priceMaxMinor,
     priceMinMinor: value.priceMinMinor ?? rules.priceMinMinor,
+    /*
+     * Category comes from the RULES, not the model.
+     *
+     * The rules only set it when a real category name appears in the message,
+     * so it is a fact rather than an inference. The model guessed "Activewear"
+     * for "yoga mat" — mats live in Fitness Accessories — and because category
+     * is a hard filter, that guess removed every yoga mat and surfaced
+     * t-shirts instead. Semantic search already handles category implicitly;
+     * it only needs to be enforced when the shopper actually named one.
+     */
+    category: rules.category,
+    // The vague-plural check is deterministic, so it overrides the model.
+    clarificationNeeded: rules.clarificationNeeded ?? value.clarificationNeeded,
+    quantityStated: (value.quantityStated || rules.quantityStated) && value.quantity !== 0,
+    // 0 means "unstated"; searching still needs a concrete number.
+    quantity: value.quantity === 0 ? 1 : value.quantity,
   };
 
   return { intent, meta, degraded: meta.degraded };

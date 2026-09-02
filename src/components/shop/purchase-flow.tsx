@@ -64,12 +64,14 @@ function useRazorpayScript(enabled: boolean) {
 export function PurchaseFlow({
   variantId,
   productTitle,
+  quantity = 1,
   agentSessionId,
   intentText,
   onClose,
 }: {
   variantId: string;
   productTitle: string;
+  quantity?: number;
   agentSessionId?: string;
   intentText?: string;
   onClose: () => void;
@@ -85,7 +87,7 @@ export function PurchaseFlow({
         headers: { "Content-Type": "application/json" },
         // "replace": selecting an option means buying that option, not adding
         // it to whatever is already sitting in an open cart.
-        body: JSON.stringify({ variantId, quantity: 1, agentSessionId, mode: "replace" }),
+        body: JSON.stringify({ variantId, quantity, agentSessionId, mode: "replace" }),
       });
       const cartData = await cartResponse.json();
       if (!cartResponse.ok) {
@@ -107,7 +109,7 @@ export function PurchaseFlow({
     } catch {
       setPhase({ name: "failed", reason: "Could not reach the server." });
     }
-  }, [variantId, agentSessionId, intentText]);
+  }, [variantId, quantity, agentSessionId, intentText]);
 
   useEffect(() => {
     void start();

@@ -50,6 +50,20 @@ function detectPriority(text: string): Priority {
   return "balanced";
 }
 
+/**
+ * Phrasing that clearly means "more than one" without saying how many.
+ *
+ * Assuming 1 for these is a guess dressed as an answer — the shopper said
+ * "a few pairs" and would receive one.
+ */
+const VAGUE_PLURAL =
+  /\b(a few|a couple|couple of|some|several|multiple|many|bulk|in bulk|for (my|the) (team|family|office|group)|for everyone|for us all)\b/i;
+
+export function hasVaguePlural(text: string): boolean {
+  if (/\b\d+\b/.test(text)) return false; // an explicit number settles it
+  return VAGUE_PLURAL.test(text);
+}
+
 function detectQuantity(text: string): number {
   const digit = text.match(/\b(\d+)\s*(?:x|pairs?|units?|pieces?|packs?|items?)\b/i);
   if (digit) return Math.max(1, Math.min(10, Number(digit[1])));
@@ -109,9 +123,13 @@ export function parseIntentWithRules(text: string, vocabulary: Vocabulary): Shop
     priceMaxMinor: matchAmount(text, MAX_PATTERNS),
     priceMinMinor: matchAmount(text, MIN_PATTERNS),
     quantity: detectQuantity(text),
+    quantityStated: /\b\d+\s*(x|pairs?|units?|pieces?|packs?|items?)\b/i.test(text) ||
+      /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(pairs?|units?|pieces?|packs?|items?)\b/i.test(text),
     priority: detectPriority(text),
     currency: "INR",
     requireInStock: true,
-    clarificationNeeded: null,
+    clarificationNeeded: hasVaguePlural(text)
+      ? "You mentioned more than one but not how many. How many would you like?"
+      : null,
   };
 }

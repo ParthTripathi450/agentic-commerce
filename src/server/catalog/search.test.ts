@@ -147,3 +147,21 @@ describe("no-hallucination guard", () => {
     expect(absent.stats.topRelevance).toBeLessThan(0.34);
   });
 });
+
+describe("filters versus availability", () => {
+  it("distinguishes 'filters too tight' from 'we do not stock it'", async () => {
+    // A wrong category filter must not read as an empty catalogue: retrieval
+    // still found a highly relevant product, so this is a filter problem.
+    const wrongCategory = await hybridSearch({
+      text: "yoga mat",
+      category: "Activewear", // mats are Fitness Accessories
+      requireInStock: true,
+    });
+    expect(wrongCategory.noRelevantMatch, "a bad filter is not an empty catalogue").toBe(false);
+    expect(wrongCategory.stats.topRelevance).toBeGreaterThan(0.5);
+
+    // Whereas nothing resembling this exists at any filter setting.
+    const absent = await hybridSearch({ text: "electric guitar", requireInStock: true });
+    expect(absent.noRelevantMatch).toBe(true);
+  });
+});

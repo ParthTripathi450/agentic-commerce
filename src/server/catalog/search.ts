@@ -283,6 +283,20 @@ export async function hybridSearch(query: StructuredQuery): Promise<SearchResult
   const merchantsSeen = new Set<string>();
   const required = query.attributes ?? {};
 
+  /*
+   * Relevance is judged on what RETRIEVAL found, before any hard filter runs.
+   *
+   * Otherwise a wrong filter looks identical to an empty catalogue: an inferred
+   * category of "Activewear" for "yoga mat" removes every yoga mat, leaving
+   * t-shirts scoring 0.27 — and the guard would report "we don't sell that"
+   * when the real problem is a filter the shopper never asked for.
+   *
+   * Filters too tight  -> relax them and say so.
+   * Nothing stocked    -> stop, and show nothing.
+   */
+  const bestRecalled = fused.reduce((max, row) => Math.max(max, Number(row.vec_score ?? 0)), 0);
+  const stocksNothingLikeIt = bestRecalled > 0 && bestRecalled < MIN_TOP_RELEVANCE;
+
   for (const [productId, variants] of byProduct) {
     const head = variants[0];
     merchantsSeen.add(head.merchant_slug);
@@ -416,9 +430,9 @@ export async function hybridSearch(query: StructuredQuery): Promise<SearchResult
 
   const topVectorScore = candidates.reduce((max, c) => Math.max(max, c.retrieval.vectorScore), 0);
 
-  // Nothing here is what was asked for. Return nothing rather than the nearest
-  // unrelated item, and tell the caller not to widen the search.
-  if (topVectorScore > 0 && topVectorScore < MIN_TOP_RELEVANCE) {
+  // Nothing in the catalogue resembles the request at all. Return nothing
+  // rather than the nearest unrelated item, and tell the caller not to widen.
+  if (stocksNothingLikeIt) {
     return {
       candidates: [],
       rejected: candidates.map((candidate) => ({
@@ -436,7 +450,7 @@ export async function hybridSearch(query: StructuredQuery): Promise<SearchResult
         accepted: 0,
         merchantsSearched: merchantsSeen.size,
         durationMs: Date.now() - startedAt,
-        topRelevance: topVectorScore,
+        topRelevance: bestRecalled,
       },
       noRelevantMatch: true,
     };
@@ -470,7 +484,7 @@ export async function hybridSearch(query: StructuredQuery): Promise<SearchResult
       accepted: relevant.length,
       merchantsSearched: merchantsSeen.size,
       durationMs: Date.now() - startedAt,
-      topRelevance: topVectorScore,
+      topRelevance: bestRecalled,
     },
     noRelevantMatch: false,
   };

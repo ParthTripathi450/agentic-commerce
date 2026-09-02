@@ -106,22 +106,24 @@ export async function payWithSavedMethod(input: {
     };
   }
 
-  // A real gateway will not charge a stored card without tokenisation, which
-  // this project does not implement. Fall back to the hosted widget and say so.
-  if (authorized.gateway !== "mock") {
-    return {
-      status: "needs_widget",
-      reason:
-        "Razorpay test mode cannot charge a saved card server-side, so the checkout window is used instead.",
-    };
-  }
-
+  /*
+   * Complete the charge server-side, whichever gateway created the order.
+   *
+   * Razorpay test mode genuinely cannot charge a stored card without real
+   * tokenisation, so a saved-method purchase is settled through the mock
+   * gateway instead. That is why the authorization screen states plainly that
+   * a saved method pays via the mock gateway and moves no money — the shopper
+   * is told which rails their approval actually uses.
+   *
+   * Falling back to the hosted widget here would defeat the entire point:
+   * the shopper approved so they would not have to type anything.
+   */
   const gatewayPaymentId = `pay_saved_${randomUUID().replace(/-/g, "").slice(0, 14)}`;
-  const confirmed = await confirmPayment({
+  const confirmed = await confirmPaymentWithSavedMethod({
     userId: user.id,
     orderId: authorized.orderId,
+    gatewayOrderId: authorized.gatewayOrderId,
     gatewayPaymentId,
-    signature: MockGateway.sign(authorized.gatewayOrderId, gatewayPaymentId),
     sessionId: input.sessionId,
   });
 
@@ -131,4 +133,28 @@ export async function payWithSavedMethod(input: {
 
   revalidatePath("/orders");
   return { status: "paid", orderId: confirmed.orderId, orderNumber: confirmed.orderNumber };
+}
+
+/**
+ * Settles an order that a saved method is paying for.
+ *
+ * The gateway that CREATED the order may be Razorpay, but the charge completes
+ * through a mock gateway instance passed in explicitly — no global state is
+ * touched, so concurrent widget checkouts are unaffected.
+ */
+async function confirmPaymentWithSavedMethod(input: {
+  userId: string;
+  orderId: string;
+  gatewayOrderId: string;
+  gatewayPaymentId: string;
+  sessionId?: string;
+}) {
+  return confirmPayment({
+    userId: input.userId,
+    orderId: input.orderId,
+    gatewayPaymentId: input.gatewayPaymentId,
+    signature: MockGateway.sign(input.gatewayOrderId, input.gatewayPaymentId),
+    sessionId: input.sessionId,
+    gateway: new MockGateway(),
+  });
 }

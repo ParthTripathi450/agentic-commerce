@@ -28,7 +28,7 @@ import {
   type CartView,
 } from "./cart";
 import { releaseExpiredCheckouts } from "./expiry";
-import { paymentGateway } from "./gateway";
+import { paymentGateway, type PaymentGateway } from "./gateway";
 
 /**
  * Checkout: cart → policy → mandates → human authorization → payment → order.
@@ -531,6 +531,15 @@ export async function confirmPayment(input: {
   gatewayPaymentId: string;
   signature: string;
   sessionId?: string;
+  /**
+   * Gateway to verify against. Defaults to the configured one.
+   *
+   * Passed explicitly by saved-method purchases, which settle through the mock
+   * gateway. Doing that by temporarily reassigning process.env would be a race:
+   * the server handles requests concurrently, so a widget checkout running at
+   * the same moment would read the swapped value.
+   */
+  gateway?: PaymentGateway;
 }): Promise<ConfirmResult> {
   const [order] = await db
     .select()
@@ -562,7 +571,7 @@ export async function confirmPayment(input: {
     .limit(1);
   if (!payment?.gatewayOrderId) return { status: "failed", reason: "No payment was started for this order." };
 
-  const gateway = paymentGateway();
+  const gateway = input.gateway ?? paymentGateway();
   const verification = gateway.verifyPaymentSignature({
     gatewayOrderId: payment.gatewayOrderId,
     gatewayPaymentId: input.gatewayPaymentId,

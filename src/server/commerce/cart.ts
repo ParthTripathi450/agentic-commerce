@@ -363,3 +363,100 @@ export async function startDirectPurchase(input: {
 
   return addToCart(input);
 }
+
+/** Sets an exact line quantity, removing the line at zero. */
+export async function setLineQuantity(input: {
+  userId: string;
+  cartId: string;
+  variantId: string;
+  quantity: number;
+}): Promise<{ ok: true } | { error: string }> {
+  const [cart] = await db
+    .select({ id: carts.id })
+    .from(carts)
+    .where(and(eq(carts.id, input.cartId), eq(carts.userId, input.userId)))
+    .limit(1);
+  if (!cart) return { error: "That cart is not yours." };
+
+  if (input.quantity <= 0) {
+    await removeFromCart(input.cartId, input.variantId);
+    return { ok: true };
+  }
+
+  const [row] = await db
+    .select({
+      available: sql<number>`GREATEST(COALESCE(${inventory.quantity},0) - COALESCE(${inventory.reserved},0), 0)`,
+      price: productVariants.priceMinor,
+      active: productVariants.active,
+    })
+    .from(productVariants)
+    .leftJoin(inventory, eq(inventory.variantId, productVariants.id))
+    .where(eq(productVariants.id, input.variantId))
+    .limit(1);
+
+  if (!row?.active) return { error: "That option is no longer for sale." };
+  if (Number(row.available) < input.quantity) {
+    return {
+      error:
+        Number(row.available) === 0
+          ? "That option is out of stock."
+          : `Only ${row.available} left in stock.`,
+    };
+  }
+
+  await db
+    .update(cartItems)
+    .set({ quantity: input.quantity, unitPriceMinor: row.price })
+    .where(and(eq(cartItems.cartId, input.cartId), eq(cartItems.variantId, input.variantId)));
+
+  return { ok: true };
+}
+
+export type CartSummary = {
+  cartId: string;
+  merchant: { id: string; slug: string; name: string };
+  itemCount: number;
+  totals: Totals;
+  issues: CartIssue[];
+  lines: CartLine[];
+};
+
+/**
+ * Every open cart, one per merchant.
+ *
+ * Carts are per-merchant because checkout, the Cart Mandate and fulfilment all
+ * are: a single basket spanning three merchants cannot be signed, charged or
+ * shipped as one order. Adding from a second merchant opens a second cart
+ * rather than producing a basket that cannot be paid for.
+ */
+export async function getOpenCarts(userId: string): Promise<CartSummary[]> {
+  const open = await db
+    .select({ id: carts.id })
+    .from(carts)
+    .where(and(eq(carts.userId, userId), eq(carts.status, "open")));
+
+  const summaries: CartSummary[] = [];
+  for (const { id } of open) {
+    const view = await loadCart(id);
+    if (view.lines.length === 0) continue;
+    summaries.push({
+      cartId: view.cartId,
+      merchant: view.merchant,
+      itemCount: view.lines.reduce((sum, l) => sum + l.quantity, 0),
+      totals: view.totals,
+      issues: view.issues,
+      lines: view.lines,
+    });
+  }
+  return summaries;
+}
+
+/** Total units across every open cart — for the nav badge. */
+export async function getCartItemCount(userId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`COALESCE(SUM(${cartItems.quantity}), 0)` })
+    .from(cartItems)
+    .innerJoin(carts, eq(carts.id, cartItems.cartId))
+    .where(and(eq(carts.userId, userId), eq(carts.status, "open")));
+  return Number(row?.n ?? 0);
+}

@@ -3,13 +3,15 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { catalogDocuments, merchants, products } from "@/db/schema";
 import { CatalogHealth } from "@/components/merchant/catalog-health";
+import { getCartItemCount } from "@/server/commerce/cart";
 import { AppSidebar, SignOutButton, type NavItem } from "@/components/app-sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { auth } from "@/lib/auth";
 import { signOutAction } from "@/server/auth/actions";
 
-const CUSTOMER_PRIMARY: NavItem[] = [
+const customerNav = (cartCount: number): NavItem[] => [
   { href: "/shop", label: "Shop with AI", icon: "shop" },
+  { href: "/cart", label: "Your cart", icon: "cart", badge: cartCount || undefined },
   { href: "/orders", label: "Your orders", icon: "orders" },
   { href: "/support", label: "Support", icon: "support" },
 ];
@@ -38,6 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session?.user?.id) redirect("/login");
 
   const isMerchant = session.user.role === "merchant";
+  const cartCount = isMerchant ? 0 : await getCartItemCount(session.user.id);
 
   // How much of this merchant's catalogue AI buyers can actually find.
   let health: { indexed: number; total: number } | null = null;
@@ -57,7 +60,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <AppSidebar
-        primary={isMerchant ? MERCHANT_PRIMARY : CUSTOMER_PRIMARY}
+        primary={isMerchant ? MERCHANT_PRIMARY : customerNav(cartCount)}
         secondary={isMerchant ? MERCHANT_SECONDARY : CUSTOMER_SECONDARY}
         user={{
           name: session.user.name ?? "Account",
