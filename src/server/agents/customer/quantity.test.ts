@@ -76,3 +76,22 @@ describe("category is a fact, not a guess", () => {
     );
   });
 });
+
+describe("availability is a safety default", () => {
+  it("requires stock unless the shopper asks otherwise", async () => {
+    const { getVocabulary } = await import("@/server/catalog/vocabulary");
+    const { wantsOutOfStock } = await import("./intent-rules");
+    const vocabulary = await getVocabulary();
+
+    // A plain request must never silently include unbuyable products — the
+    // model returned requireInStock:false here on its own.
+    expect(parseIntentWithRules("black running shoes size 10", vocabulary).requireInStock).toBe(true);
+    expect(wantsOutOfStock("black running shoes size 10")).toBe(false);
+
+    // Only an explicit ask widens it.
+    expect(wantsOutOfStock("running shoes including unavailable ones")).toBe(true);
+    expect(
+      parseIntentWithRules("running shoes including unavailable ones", vocabulary).requireInStock,
+    ).toBe(false);
+  });
+});

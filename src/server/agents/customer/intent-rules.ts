@@ -85,6 +85,20 @@ function matchVocabulary(text: string, options: string[]): string | null {
   return null;
 }
 
+/**
+ * Only include unavailable items when the shopper actually asks for them.
+ *
+ * Availability is a safety default, not something to infer: silently widening
+ * a search to out-of-stock products wastes the shopper's time and, in the
+ * autonomous flow, leads the agent toward a cart it cannot fulfil.
+ */
+const WANTS_UNAVAILABLE =
+  /\b(out of stock|including unavailable|even if unavailable|pre-?order|backorder|coming soon|any availability)\b/i;
+
+export function wantsOutOfStock(text: string): boolean {
+  return WANTS_UNAVAILABLE.test(text);
+}
+
 export function parseIntentWithRules(text: string, vocabulary: Vocabulary): ShoppingIntent {
   const attributes: Record<string, string> = {};
 
@@ -127,7 +141,7 @@ export function parseIntentWithRules(text: string, vocabulary: Vocabulary): Shop
       /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(pairs?|units?|pieces?|packs?|items?)\b/i.test(text),
     priority: detectPriority(text),
     currency: "INR",
-    requireInStock: true,
+    requireInStock: !wantsOutOfStock(text),
     clarificationNeeded: hasVaguePlural(text)
       ? "You mentioned more than one but not how many. How many would you like?"
       : null,

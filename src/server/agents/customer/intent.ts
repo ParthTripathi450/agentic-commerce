@@ -97,6 +97,12 @@ export async function parseIntent(message: string): Promise<ParsedIntent> {
      * it only needs to be enforced when the shopper actually named one.
      */
     category: rules.category,
+    /*
+     * Availability, like category, is decided by the rules rather than the
+     * model. gpt-oss intermittently returned requireInStock:false for a plain
+     * request, which silently widens the search to products nobody can buy.
+     */
+    requireInStock: rules.requireInStock,
     // The vague-plural check is deterministic, so it overrides the model.
     clarificationNeeded: rules.clarificationNeeded ?? value.clarificationNeeded,
     quantityStated: (value.quantityStated || rules.quantityStated) && value.quantity !== 0,
