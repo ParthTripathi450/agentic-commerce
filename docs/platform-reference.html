@@ -282,6 +282,68 @@
 
   :focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  /* ------------------------------------------------------------------ print
+     One source, two presentations. The screen layout leads with a dark rail;
+     on paper that is a solid block of ink down every page and a column of
+     links nobody can click, so print gets the rail as a masthead instead and
+     the content runs full width. Colours are forced light because a printer
+     has one ground. */
+  @page { size: A4; margin: 16mm 14mm 18mm; }
+
+  @media print {
+    :root {
+      --paper: #ffffff; --surface: #ffffff;
+      --text: #14161f; --text-muted: #4a4f63; --text-faint: #6b7185;
+      --line: #c9ccdb; --line-soft: #e2e4ee;
+      --violet: #5b3aa6; --violet-deep: #3e0f8d;
+    }
+    body { background: #fff; font-size: 9.7pt; line-height: 1.5; }
+    .shell { grid-template-columns: 1fr; display: block; }
+    main { padding: 0; }
+    .wrap { max-width: none; gap: 1.6rem; }
+    :root { --measure: 100%; }
+
+    /* The rail becomes a masthead: identity kept, navigation dropped. */
+    .rail {
+      background: #fff; color: var(--text);
+      padding: 0 0 .8rem; height: auto; position: static;
+      border-bottom: 2px solid var(--ink);
+      display: block; margin-bottom: 1.4rem;
+    }
+    .rail nav { display: none; }
+    .rail__mark { color: var(--violet-deep); }
+    .rail__title { color: var(--text); font-size: 15pt; }
+    .rail__sub { max-width: 46em; }
+    .rail__foot {
+      margin-top: .5rem; color: var(--text-muted);
+      border-top: 1px solid var(--line-soft); padding-top: .5rem;
+    }
+
+    h1 { font-size: 22pt; }
+    h2 { font-size: 14pt; }
+    h3 { font-size: 10.5pt; }
+    .standfirst { font-size: 11pt; }
+
+    /* Keep a heading with what it introduces, and never split a row or card. */
+    h2, h3 { break-after: avoid; page-break-after: avoid; }
+    section { break-inside: auto; }
+    .panel, .pipeline li, .note, figure, tr { break-inside: avoid; page-break-inside: avoid; }
+    .tablewrap { break-inside: auto; overflow: visible; border-color: var(--line); }
+    thead { display: table-header-group; }
+
+    .section-head { border-top-color: var(--ink); }
+    .grid2 { grid-template-columns: 1fr 1fr; gap: .6rem; }
+    .panel { padding: .6rem .7rem; }
+    .stat-row { gap: 1.4rem; }
+    .stat b { font-size: 13pt; }
+    .pipeline li { padding: .5rem .7rem; }
+    .row-hi td { background: #f4f1dc; }
+    code { background: #f1f1f7; }
+
+    a { color: var(--text); text-decoration: none; }
+    :focus-visible { outline: none; }
+  }
 </style>
 </head>
 <body>
