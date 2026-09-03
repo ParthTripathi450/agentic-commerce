@@ -16,6 +16,8 @@ export type ProductVariantView = {
   compareAtPriceMinor: number | null;
   currency: string;
   availableQuantity: number;
+  /** Per-colour photograph; null falls back to the product's own image. */
+  imageUrl: string | null;
 };
 
 export type ProductDetail = {
@@ -59,6 +61,7 @@ export async function getProductDetail(productId: string): Promise<ProductDetail
 
   const variants = (await db.execute(sql`
     SELECT v.id, v.sku, v.attributes, v.price_minor, v.compare_at_price_minor, v.currency,
+           v.image_url,
            GREATEST(COALESCE(i.quantity, 0) - COALESCE(i.reserved, 0), 0) AS available
     FROM product_variants v
     LEFT JOIN inventory i ON i.variant_id = v.id
@@ -74,6 +77,7 @@ export async function getProductDetail(productId: string): Promise<ProductDetail
     compareAtPriceMinor: v.compare_at_price_minor === null ? null : Number(v.compare_at_price_minor),
     currency: String(v.currency),
     availableQuantity: Number(v.available ?? 0),
+    imageUrl: v.image_url === null || v.image_url === undefined ? null : String(v.image_url),
   }));
 
   return {

@@ -93,7 +93,9 @@ export type TurnDto = {
   };
   options: OptionDto[];
   comparisons: Array<{ rank: number; label: string; summary: string; deltas: string[] }>;
-  excluded: Array<{ label: string; reason: string }>;
+  /** `productId` so a ruled-out item is still reachable — being ruled out for
+   *  one query does not mean the shopper never wants to look at it. */
+  excluded: Array<{ productId: string | null; label: string; reason: string }>;
   relaxations: Array<{ constraint: string; from: string; to: string; reason: string }>;
   weights: Record<string, number>;
   stats: {
@@ -205,7 +207,7 @@ export function toTurnDto(turn: ShoppingTurn): TurnDto {
       })) ?? [],
     excluded: turn.ranking.rejectedAlternatives
       .slice(0, 8)
-      .map((r) => ({ label: r.label, reason: r.reason })),
+      .map((r) => ({ productId: r.ref ?? null, label: r.label, reason: r.reason })),
     relaxations: turn.relaxations,
     weights: (turn.ranking.weights ?? {}) as unknown as Record<string, number>,
     stats: turn.stats,

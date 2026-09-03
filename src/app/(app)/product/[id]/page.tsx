@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
+import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { ProductDetailView } from "@/components/shop/product-detail";
 import { AlsoLike } from "@/components/shop/also-like";
@@ -29,11 +29,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
       <PageHeader
         title={product.title}
         description={`${product.brand ? `${product.brand} · ` : ""}${product.category} · sold by ${product.merchant.name}`}
-        actions={
-          <Link href="/shop" className="text-sm text-muted-foreground hover:text-foreground">
-            Back to shopping
-          </Link>
-        }
+        actions={<BackLink label="Back to results" />}
       />
       <ProductDetailView product={product} />
       <Card>

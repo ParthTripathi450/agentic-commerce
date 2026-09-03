@@ -105,7 +105,7 @@ export function CheckoutFlow({
           }),
         })
       ).json();
-      if (saved.status === "paid") return setPhase({ name: "paid", orderNumber: saved.orderNumber });
+      if (saved.status === "paid") return (router.refresh(), setPhase({ name: "paid", orderNumber: saved.orderNumber }));
       if (saved.status === "failed") return setPhase({ name: "failed", reason: saved.reason });
     }
 
@@ -144,7 +144,7 @@ export function CheckoutFlow({
         ).json();
         setPhase(
           confirmed.status === "paid"
-            ? { name: "paid", orderNumber: confirmed.orderNumber }
+            ? ((router.refresh()), { name: "paid", orderNumber: confirmed.orderNumber })
             : { name: "failed", reason: confirmed.reason },
         );
       },

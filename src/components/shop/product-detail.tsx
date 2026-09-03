@@ -24,6 +24,44 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
   const [variantId, setVariantId] = useState(
     product.defaultVariantId ?? product.variants[0]?.variantId ?? "",
   );
+
+  /*
+   * Size first, then the colours that exist IN that size.
+   *
+   * Offering every colour and only discovering at checkout that it does not
+   * come in your size is the wrong order to ask the questions in — and a
+   * colour swatch that leads nowhere is a promise the catalogue cannot keep.
+   */
+  const current = product.variants.find((v) => v.variantId === variantId);
+  const hasSizes = product.variants.some((v) => v.attributes.size);
+  const hasColors = product.variants.some((v) => v.attributes.color);
+
+  const sizes = [...new Set(product.variants.map((v) => v.attributes.size).filter(Boolean))];
+  const selectedSize = current?.attributes.size;
+
+  const colorsInSize = [
+    ...new Map(
+      product.variants
+        .filter((v) => !hasSizes || v.attributes.size === selectedSize)
+        .filter((v) => v.attributes.color)
+        .map((v) => [v.attributes.color, v] as const),
+    ).values(),
+  ];
+
+  /** Keeps the colour when switching size, if that pairing exists. */
+  function selectSize(size: string) {
+    const wantedColor = current?.attributes.color;
+    const match =
+      product.variants.find(
+        (v) => v.attributes.size === size && v.attributes.color === wantedColor && v.availableQuantity > 0,
+      ) ??
+      product.variants.find((v) => v.attributes.size === size && v.availableQuantity > 0) ??
+      product.variants.find((v) => v.attributes.size === size);
+    if (match) {
+      setVariantId(match.variantId);
+      setAdded(false);
+    }
+  }
   const [quantity, setQuantity] = useState(1);
   const [pending, start] = useTransition();
   const [added, setAdded] = useState(false);
@@ -32,6 +70,9 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
   const variant = product.variants.find((v) => v.variantId === variantId);
   const qualities = extractQualities(product.attributes);
   // Everything except the rated features, which get their own block above.
+  // The chosen colour's photograph, falling back to the product's own.
+  const heroImage = current?.imageUrl ?? product.imageUrls[0] ?? null;
+
   const specs = Object.fromEntries(
     Object.entries(product.attributes as Record<string, unknown>).filter(
       ([key]) => key !== "qualities",
@@ -44,10 +85,11 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
       <Card>
         <CardBody className="p-0">
           <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-surface-2">
-            {product.imageUrls[0] ? (
+            {heroImage ? (
               <Image
-                src={product.imageUrls[0]}
-                alt={product.title}
+                key={heroImage}
+                src={heroImage}
+                alt={`${product.title}${current?.attributes.color ? ` in ${current.attributes.color}` : ""}`}
                 fill
                 sizes="(min-width: 768px) 50vw, 100vw"
                 className="object-cover"
@@ -93,36 +135,69 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
             <p className="text-sm leading-relaxed text-muted-foreground">{product.description}</p>
 
             {/* Options, with stock shown per choice rather than discovered at checkout. */}
-            {product.variants.length > 1 ? (
+            {hasSizes ? (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Options
+                  Size
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {product.variants.map((v) => {
-                    const label = Object.values(v.attributes).join(" · ") || v.sku;
-                    const disabled = v.availableQuantity === 0;
+                  {sizes.map((size) => {
+                    const anyInStock = product.variants.some(
+                      (v) => v.attributes.size === size && v.availableQuantity > 0,
+                    );
                     return (
                       <button
-                        key={v.variantId}
+                        key={size}
                         type="button"
-                        disabled={disabled}
-                        onClick={() => {
-                          setVariantId(v.variantId);
-                          setAdded(false);
-                        }}
+                        disabled={!anyInStock}
+                        onClick={() => selectSize(size)}
                         className={cn(
-                          "rounded-full border px-3 py-1.5 text-xs transition-colors",
-                          v.variantId === variantId
-                            ? "border-primary bg-primary/10 text-primary"
+                          "min-w-11 rounded-md border px-3 py-1.5 text-sm transition-colors",
+                          size === selectedSize
+                            ? "border-primary bg-primary/10 font-medium text-primary"
                             : "border-border hover:bg-surface-2",
-                          disabled && "cursor-not-allowed opacity-40 line-through",
+                          !anyInStock && "cursor-not-allowed opacity-40 line-through",
                         )}
                       >
-                        {label}
+                        {size}
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            ) : null}
+
+            {hasColors ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Colour
+                  {selectedSize ? (
+                    <span className="ml-1 normal-case tracking-normal text-subtle">
+                      — available in size {selectedSize}
+                    </span>
+                  ) : null}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {colorsInSize.map((v) => (
+                    <button
+                      key={v.variantId}
+                      type="button"
+                      disabled={v.availableQuantity === 0}
+                      onClick={() => {
+                        setVariantId(v.variantId);
+                        setAdded(false);
+                      }}
+                      className={cn(
+                        "rounded-md border px-3 py-1.5 text-sm capitalize transition-colors",
+                        v.variantId === variantId
+                          ? "border-primary bg-primary/10 font-medium text-primary"
+                          : "border-border hover:bg-surface-2",
+                        v.availableQuantity === 0 && "cursor-not-allowed opacity-40 line-through",
+                      )}
+                    >
+                      {v.attributes.color}
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : null}

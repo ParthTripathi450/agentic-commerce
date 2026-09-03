@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/page-header";
+import { BackLink } from "@/components/back-link";
 import { LinkButton } from "@/components/ui";
 import { ReviewList } from "@/components/reviews/review-list";
 import { requireCustomer } from "@/lib/session";
@@ -14,6 +15,7 @@ export default async function MyReviews() {
 
   return (
     <div className="space-y-5">
+      <BackLink fallback="/orders" label="Back to orders" />
       <PageHeader
         title="Your reviews"
         description={

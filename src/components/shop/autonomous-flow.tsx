@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ShieldCheck, ShoppingCart, X } from "lucide-react";
@@ -276,7 +277,7 @@ export function AutonomousFlow({
       ).json();
 
       if (saved.status === "paid") {
-        return setPhase({ name: "paid", orderNumber: saved.orderNumber });
+        return (router.refresh(), setPhase({ name: "paid", orderNumber: saved.orderNumber }));
       }
       if (saved.status === "failed") {
         return setPhase({ name: "failed", reason: saved.reason, checks: saved.checks });
@@ -329,7 +330,7 @@ export function AutonomousFlow({
         ).json();
         setPhase(
           confirmed.status === "paid"
-            ? { name: "paid", orderNumber: confirmed.orderNumber }
+            ? ((router.refresh()), { name: "paid", orderNumber: confirmed.orderNumber })
             : { name: "failed", reason: confirmed.reason },
         );
       },
@@ -510,7 +511,12 @@ function AuthorizationScreen({
             ) : null}
             <div className="min-w-0">
               <p className="text-xs text-muted-foreground">{selected.merchant.name}</p>
-              <p className="text-sm font-semibold">{selected.title}</p>
+              <Link
+                href={`/product/${selected.productId}`}
+                className="text-sm font-semibold hover:text-primary hover:underline"
+              >
+                {selected.title}
+              </Link>
               <p className="text-xs text-muted-foreground">
                 {Object.entries(selected.variantAttributes)
                   .map(([k, v]) => `${k} ${v}`)
@@ -625,7 +631,14 @@ function AuthorizationScreen({
                 </span>
               </div>
               <div>
-                <p className="text-sm font-medium">{alt.option.title}</p>
+                {/* A runner-up is a real product the shopper may prefer once
+                    they read it, so it links through like any other. */}
+                <Link
+                  href={`/product/${alt.option.productId}`}
+                  className="text-sm font-medium hover:text-primary hover:underline"
+                >
+                  {alt.option.title}
+                </Link>
                 <p className="text-xs text-muted-foreground">{alt.option.merchant.name}</p>
               </div>
               {alt.deltas.length > 0 ? (

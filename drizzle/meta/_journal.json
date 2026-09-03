@@ -50,6 +50,13 @@
       "when": 1788380101918,
       "tag": "0006_evidence_chunks",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788427859653,
+      "tag": "0007_variant_image",
+      "breakpoints": true
     }
   ]
 }

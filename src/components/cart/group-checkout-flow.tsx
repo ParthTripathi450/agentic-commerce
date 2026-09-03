@@ -135,11 +135,14 @@ export function GroupCheckoutFlow({ savedMethod }: { savedMethod: string | null 
             }),
           })
         ).json();
-        setPhase(
-          confirmed.status === "paid"
-            ? { name: "paid", orderNumbers: confirmed.orderNumbers, steps: [] }
-            : { name: "failed", reason: confirmed.reason },
-        );
+        if (confirmed.status === "paid") {
+          // The sidebar cart badge is server-rendered, so a paid cart keeps
+          // showing its old count until the layout re-renders.
+          router.refresh();
+          setPhase({ name: "paid", orderNumbers: confirmed.orderNumbers, steps: [] });
+        } else {
+          setPhase({ name: "failed", reason: confirmed.reason });
+        }
       },
       modal: {
         ondismiss: () =>
@@ -190,6 +193,7 @@ export function GroupCheckoutFlow({ savedMethod }: { savedMethod: string | null 
       ...(result.steps ?? []),
     ];
 
+    if (result.status === "paid") router.refresh();
     setPhase(
       result.status === "paid"
         ? { name: "paid", orderNumbers: result.orderNumbers, steps }

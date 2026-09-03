@@ -72,6 +72,14 @@ export const productVariants = pgTable(
     currency: currency(),
     barcode: varchar("barcode", { length: 64 }),
     active: boolean("active").notNull().default(true),
+    /**
+     * Per-variant photography, so changing colour changes the picture.
+     *
+     * Falls back to the product's own `imageUrls` when null — most variants
+     * differ only by size, where a separate photograph would be the same
+     * photograph.
+     */
+    imageUrl: text("image_url"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

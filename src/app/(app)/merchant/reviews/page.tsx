@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
+import { BackLink } from "@/components/back-link";
 import { Card, CardBody } from "@/components/ui";
 import { RatingSummary, ReviewList } from "@/components/reviews/review-list";
 import { requireMerchant } from "@/lib/session";
@@ -27,6 +28,7 @@ export default async function MerchantReviews({
 
   return (
     <div className="space-y-5">
+      <BackLink fallback="/merchant" label="Back to dashboard" />
       <PageHeader
         title="Reviews"
         description={

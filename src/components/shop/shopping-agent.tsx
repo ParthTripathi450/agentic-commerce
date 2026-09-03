@@ -369,7 +369,16 @@ function TurnView({ turn, onReorder }: { turn: TurnDto; onReorder: (order: strin
             <ul className="space-y-1.5">
               {turn.excluded.map((item, index) => (
                 <li key={`${item.label}-${index}`} className="text-sm">
-                  <span className="text-foreground">{item.label}</span>
+                  {item.productId ? (
+                    <Link
+                      href={`/product/${item.productId}`}
+                      className="text-foreground hover:text-primary hover:underline"
+                    >
+                      {item.label}
+                    </Link>
+                  ) : (
+                    <span className="text-foreground">{item.label}</span>
+                  )}
                   <span className="text-muted-foreground"> — {item.reason}</span>
                 </li>
               ))}
