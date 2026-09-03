@@ -169,6 +169,34 @@ fewer tokens and a separate daily pool. Groq's catalogue had rotated again (§8.
 `llama-3.1-8b-instant`; `gpt-oss-20b` and `qwen3.x-27b` are what is available.
 **Groq is the only configured provider — a `GEMINI_API_KEY` would give real failover.**
 
+### Fixing the retrieval weak spots — structured feature constraints
+Chose SQL pre-filtering over a reranker or a bigger embedder, and the eval said why: single-attribute
+queries scored 0.629 while trade-offs scored 0.338 on the *same* corpus and embedder. The gap is
+logic, not semantics — no bi-encoder encodes "at least 4/5" or separates "waterproof AND breathable"
+from "waterproof but NOT breathable". So the model extracts constraints from language and SQL
+applies them.
+
+| | before | after |
+|---|---|---|
+| attribute | 0.629 | **0.833** |
+| trade-off | 0.338 | **0.688** |
+| negation | 0.300 | **1.000** |
+| overall | 0.722 | **0.772** |
+| paraphrase (held out) | — | 0.280 |
+
+Two measured decisions: the filter must run *inside* recall (post-filtering stalled trade-off at
+0.438), and a missing quality key must EXCLUDE (tolerating NULL let every unscored garment through
+`packability <= 2`, also 0.438).
+
+**The eval was made ungameable first.** Ground truth for these cases IS the SQL predicate, so
+implementing the filter would score ~1.0 by construction. Ten `paraphrase` cases carry no
+constraints and never name the feature ("my feet get unbearably hot") — they measure retrieval
+alone. That number is 0.280 and did **not** move, which is correct: filtering helps only when the
+shopper states a feature. Implicit needs remain the 22M embedder's ceiling.
+
+Verified live that the model extracts constraints from prose — conjunction, contrast, negation, and
+correctly extracting *nothing* from "black running shoes size 10".
+
 ### The RAG dataset (this session)
 **503 products, 4,008 reviews, 57 categories** — generated for coherence, not volume.
 Archetype × material × brand tier produces the description, the 1–5 `qualities` scores AND the

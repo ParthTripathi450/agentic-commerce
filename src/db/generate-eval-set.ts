@@ -34,8 +34,17 @@ type EvalCase = {
   id: string;
   /** Natural-language question, as a shopper would ask it. */
   query: string;
+  /**
+   * Constraints the pipeline would extract for this query.
+   *
+   * Present on `attribute` and `trade-off` cases, which a shopper states
+   * explicitly. Deliberately ABSENT on `paraphrase` cases — those describe the
+   * same need without naming the feature, so they measure retrieval rather
+   * than a filter agreeing with the predicate that defined the ground truth.
+   */
+  qualityConstraints?: { key: string; op: "gte" | "lte"; value: number }[];
   /** What is being tested, so a failure is diagnosable. */
-  kind: "attribute" | "trade-off" | "category" | "comparison" | "negation" | "budget";
+  kind: "attribute" | "trade-off" | "category" | "comparison" | "negation" | "budget" | "paraphrase";
   /** Product ids that genuinely satisfy the query. */
   expectedProductIds: string[];
   /** Human-readable expectation, for eyeballing a failure. */
@@ -102,6 +111,7 @@ async function main() {
       add({
         query,
         kind: "attribute",
+        qualityConstraints: [{ key, op: "gte", value: 4 }],
         expectedProductIds: rows.map((r) => r.id),
         rationale: `${QUALITY_LABELS[key]} scored 4 or 5`,
       });
@@ -121,6 +131,10 @@ async function main() {
     add({
       query,
       kind: "trade-off",
+      qualityConstraints: [
+        { key: high, op: "gte", value: 4 },
+        { key: low, op: "lte", value: 2 },
+      ],
       expectedProductIds: rows.map((r) => r.id),
       rationale: `${QUALITY_LABELS[high]} >= 4 AND ${QUALITY_LABELS[low]} <= 2`,
     });
@@ -163,6 +177,41 @@ async function main() {
     });
   }
 
+  // ---- paraphrase: the honesty check ------------------------------------
+  //
+  // Same ground truth as the attribute cases, but phrased WITHOUT naming the
+  // feature — so no predicate can be extracted and retrieval has to do the
+  // work. Without these, adding a filter would score ~1.0 by construction and
+  // the eval would have stopped measuring anything.
+  const PARAPHRASES: Array<{ key: QualityKey; query: string }> = [
+    { key: "waterResistance", query: "something for walking the dog in a downpour" },
+    { key: "breathability", query: "my feet get unbearably hot in the afternoon" },
+    { key: "warmth", query: "I am always cold at the bus stop in January" },
+    { key: "durability", query: "the last pair fell apart in three months" },
+    { key: "comfort", query: "I am on my feet from six in the morning" },
+    { key: "grip", query: "I keep slipping on the wet path to the station" },
+    { key: "noiseIsolation", query: "the open-plan office is unbearable" },
+    { key: "batteryLife", query: "I keep running out of charge on the train home" },
+    { key: "packability", query: "everything has to fit in one carry-on" },
+    { key: "heatRetention", query: "my coffee is cold by the time I get to work" },
+  ];
+
+  for (const { key, query } of PARAPHRASES) {
+    const rows = (await db.execute(sql`
+      SELECT id FROM products
+      WHERE status = 'active' AND (attributes->'qualities'->>${key})::int >= 4
+      ORDER BY title
+    `)) as unknown as { id: string }[];
+
+    add({
+      query,
+      kind: "paraphrase",
+      // No constraints on purpose — this is the held-out measurement.
+      expectedProductIds: rows.map((r) => r.id),
+      rationale: `${QUALITY_LABELS[key]} >= 4, described without naming it`,
+    });
+  }
+
   // ---- negation: the case retrieval usually gets wrong -------------------
   const notWaterproof = (await db.execute(sql`
     SELECT id FROM products
@@ -172,8 +221,23 @@ async function main() {
   add({
     query: "shoes that are definitely not waterproof, I want maximum airflow",
     kind: "negation",
+    qualityConstraints: [{ key: "waterResistance", op: "lte", value: 2 }],
     expectedProductIds: notWaterproof.map((r) => r.id),
     rationale: "water resistance <= 2 — tests that a negated term is not treated as a positive one",
+  });
+
+  // A second negation, phrased the other way round.
+  const notHeavy = (await db.execute(sql`
+    SELECT id FROM products
+    WHERE status='active' AND (attributes->'qualities'->>'warmth')::int <= 2
+    ORDER BY title
+  `)) as unknown as { id: string }[];
+  add({
+    query: "something light that is not warm at all, for summer",
+    kind: "negation",
+    qualityConstraints: [{ key: "warmth", op: "lte", value: 2 }],
+    expectedProductIds: notHeavy.map((r) => r.id),
+    rationale: "warmth <= 2",
   });
 
   // Shuffle so an eval run does not walk the categories in order.

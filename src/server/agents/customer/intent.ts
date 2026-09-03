@@ -119,6 +119,7 @@ export async function parseIntent(message: string): Promise<ParsedIntent> {
     quantityStated: (value.quantityStated || rules.quantityStated) && value.quantity !== 0,
     // 0 means "unstated"; searching still needs a concrete number.
     quantity: value.quantity === 0 ? 1 : value.quantity,
+    qualityConstraints: [],
   };
 
   return { intent, meta, degraded: meta.degraded };
@@ -137,6 +138,7 @@ export function intentToQuery(
     priceMinMinor: intent.priceMinMinor,
     priceMaxMinor: intent.priceMaxMinor,
     requireInStock: intent.requireInStock,
+    qualityConstraints: intent.qualityConstraints,
     excludeMerchantIds: options.excludeMerchantIds,
     limit: options.limit ?? 10,
   };

@@ -80,6 +80,24 @@ const responseSchema = z.object({
   suggestions: z.array(capped(60)).max(8).default([]),
   /** A natural search phrase built from everything understood so far. */
   searchPhrase: capped(300).default(""),
+  /**
+   * Rated-feature constraints the shopper stated, e.g. "waterproof but
+   * breathable" -> waterResistance >= 4 AND breathability >= 4.
+   *
+   * Extracted by the model because reading intent out of language is what it is
+   * for; applied as a SQL predicate because "at least 4 out of 5" is a filter,
+   * not a similarity. Only ever populated from what was actually SAID.
+   */
+  qualityConstraints: z
+    .array(
+      z.object({
+        key: capped(40),
+        op: z.enum(["gte", "lte"]).default("gte"),
+        value: z.number().int().min(1).max(5).default(4),
+      }),
+    )
+    .max(4)
+    .default([]),
   /** What the shopper is optimising for, if they said. */
   priority: z
     .enum(["balanced", "cheapest", "fastest", "best_quality", "most_flexible"])
@@ -107,9 +125,19 @@ RULES
 - searchPhrase: everything you understand, as one natural product description to search with. Include purpose and stated attributes; leave out anything unknown.
 
 Reply with JSON only:
-{"slots":{"productType":string|null,"purpose":string|null,"size":string|null,"color":string|null,"brand":string|null,"width":string|null,"gender":string|null,"budgetMax":number|null,"budgetMin":number|null,"quantity":number|null},"understanding":string,"readyToSearch":boolean,"question":string|null,"questionAbout":string|null,"suggestions":string[],"searchPhrase":string}
+{"slots":{"productType":string|null,"purpose":string|null,"size":string|null,"color":string|null,"brand":string|null,"width":string|null,"gender":string|null,"budgetMax":number|null,"budgetMin":number|null,"quantity":number|null},"understanding":string,"readyToSearch":boolean,"question":string|null,"questionAbout":string|null,"suggestions":string[],"searchPhrase":string,"qualityConstraints":[{"key":string,"op":"gte"|"lte","value":number}]}
 
 budgetMax/budgetMin are whole rupees, not paise.
+qualityConstraints: ONLY when the customer states a requirement about a rated feature. Available keys: durability, comfort, breathability, waterResistance, grip, warmth, materialQuality, support, packability, easeOfCare, batteryLife, soundQuality, noiseIsolation, portability, capacity, heatRetention, sharpness, nonStick, absorbency, softness, brightness, stability.
+Use op "gte" with value 4 for something they WANT ("waterproof", "breathable", "hard-wearing").
+Use op "lte" with value 2 for something they explicitly do NOT want or do not care about ("I don't care about rain", "not waterproof", "weight is not a concern" -> packability lte 2).
+Extract EVERY feature the customer names, not just the first. Two wanted features is the common case:
+"waterproof shoes that still breathe well" -> [{key:"waterResistance",op:"gte",value:4},{key:"breathability",op:"gte",value:4}]
+"waterproof but I know it won't breathe" -> [{key:"waterResistance",op:"gte",value:4},{key:"breathability",op:"lte",value:2}]
+"comfortable walking shoes" -> [{key:"comfort",op:"gte",value:4}]
+"tough, and weight is not a concern" -> [{key:"durability",op:"gte",value:4},{key:"packability",op:"lte",value:2}]
+Return an EMPTY array when no feature requirement was stated. Never infer one from the product type alone — wanting running shoes does not mean wanting breathability.
+
 priority: "cheapest" if they care most about price, "fastest" about delivery speed, "best_quality" about quality or ratings, "most_flexible" about returns, otherwise "balanced".
 
 This single reply replaces a separate intent-parsing step, so extract everything in one pass.`;
@@ -161,6 +189,7 @@ function fallbackUnderstanding(
     suggestions: next ? next.options.map((o) => o.label).slice(0, 6) : [],
     searchPhrase: shopperText,
     priority: intent.priority,
+    qualityConstraints: [],
   };
 }
 
@@ -339,6 +368,7 @@ export function intentFromUnderstanding(
     quantity: slots.quantity && slots.quantity > 0 ? slots.quantity : 1,
     quantityStated: slots.quantity != null && slots.quantity > 0,
     priority: understanding.priority,
+    qualityConstraints: understanding.qualityConstraints ?? [],
     currency: "INR",
     requireInStock: !wantsOutOfStock(shopperText),
     clarificationNeeded: null,

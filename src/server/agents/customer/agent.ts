@@ -146,6 +146,26 @@ const RELAXATIONS: Array<{
     },
   },
   {
+    // Relaxed BEFORE stock: "waterproof" is a preference the shopper can be
+    // shown near-misses for, whereas an unbuyable result helps nobody.
+    constraint: "rated features",
+    apply: (query) => {
+      if (!query.qualityConstraints?.length) return null;
+      const wanted = query.qualityConstraints
+        .map((c) => `${c.key} ${c.op === "gte" ? "≥" : "≤"} ${c.value}/5`)
+        .join(", ");
+      return {
+        query: { ...query, qualityConstraints: [] },
+        relaxation: {
+          constraint: "rated features",
+          from: wanted,
+          to: "any rating",
+          reason: "nothing rated that highly matched, so I looked at the rest too",
+        },
+      };
+    },
+  },
+  {
     constraint: "stock",
     apply: (query) => {
       if (query.requireInStock === false) return null;

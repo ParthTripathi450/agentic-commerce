@@ -288,12 +288,37 @@ Reviews are embedded as their **own** chunks rather than folded into the product
 that would blur the product's identity and match neither specs nor reviews well. Separate chunks
 let "do these run hot in summer?" retrieve the sentence that answers it and cite its source.
 
+**Rated features are a PREDICATE, not a similarity signal.** `qualityConstraints` on
+`StructuredQuery` become a SQL pre-filter inside both recall legs. The evidence for doing it this
+way came from the eval itself: single-attribute queries scored 0.629 while trade-offs scored 0.338
+on the *same* corpus and embedder — the gap is logic, not semantics, and no bi-encoder represents
+"at least 4 out of 5" or distinguishes "waterproof AND breathable" from "waterproof but NOT
+breathable". The model extracts the constraint from language (what it is for); SQL applies it (what
+it is for). Two decisions that were measured, not guessed:
+
+- **Pre-filter, not post-filter.** Filtering after recall only narrows what similarity already
+  chose, so a qualifying product ranked 80th stays lost — trade-off stalled at 0.438 that way.
+- **A missing quality key EXCLUDES the product.** Every product carries scores for the qualities its
+  category is measured on, so an absent key means the quality does not apply (a t-shirt has no water
+  resistance rating). Tolerating NULL let every unscored garment through `packability <= 2` and
+  pinned trade-off at 0.438. If the constraint is too tight, the relaxation path drops it and says
+  so — the honest way to widen.
+
 **The eval set is the point** (`npm run eval:generate`, `npm run eval:retrieval`). Ground truth is
 computed from the same quality scores that generated the catalogue, so it is exact rather than
-hand-judged. Current baseline at k=10: **overall recall 0.722, MRR 0.776** — category 0.890,
-attribute 0.629, trade-off 0.338, negation 0.300. Expected sets must be COMPLETE, never sampled: an
-early version capped them at 40 rows and measured the wrong thing entirely, since 178 products
-qualify as breathable and retrieval could return ten genuinely breathable shoes and score zero.
+hand-judged. Baseline at k=10: **overall recall 0.772, MRR 0.796** — category 0.894, attribute
+0.833, trade-off 0.688, negation 1.000, **paraphrase 0.280**.
+
+Two properties the harness must keep:
+- Expected sets must be COMPLETE, never sampled. An early version capped them at 40 rows and
+  measured the wrong thing entirely: 178 products qualify as breathable, so retrieval could return
+  ten genuinely breathable shoes and score zero.
+- **`paraphrase` cases carry NO constraints on purpose.** They describe a need without naming the
+  feature ("my feet get unbearably hot"), so no predicate can be extracted and retrieval has to do
+  the work alone. Without them, adding a filter would score ~1.0 by construction and the eval would
+  have stopped measuring anything. That 0.280 is the honest ceiling of the 22M embedder, and it did
+  NOT move when filtering was added — which is exactly right, and is where a stronger model would
+  earn its keep.
 
 ### Recommendations (`server/catalog/recommendations.ts`)
 Two different questions, two sources. **`alsoBought`** is real co-purchase from `order_items` — what

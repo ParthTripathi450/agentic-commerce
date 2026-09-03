@@ -40,6 +40,20 @@ export const shoppingIntentSchema = z.object({
   priority: z.enum(PRIORITIES).default("balanced"),
   currency: z.string().length(3).default("INR"),
   requireInStock: z.boolean().default(true),
+  /**
+   * Rated-feature constraints the shopper stated, carried through to retrieval
+   * as a predicate rather than as similarity.
+   */
+  qualityConstraints: z
+    .array(
+      z.object({
+        key: z.string().max(40),
+        op: z.enum(["gte", "lte"]),
+        value: z.number().int().min(1).max(5),
+      }),
+    )
+    .max(4)
+    .default([]),
   /** Set when the request is too vague to search on without guessing. */
   clarificationNeeded: z.string().max(300).nullable().default(null),
 });

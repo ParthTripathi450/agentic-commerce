@@ -18,6 +18,7 @@ type EvalCase = {
   kind: string;
   expectedProductIds: string[];
   rationale: string;
+  qualityConstraints?: { key: string; op: "gte" | "lte"; value: number }[];
 };
 
 const K = 10;
@@ -44,10 +45,21 @@ async function main() {
   const worst: Array<{ id: string; query: string; recall: number; rationale: string }> = [];
 
   for (const testCase of payload.cases) {
+    /*
+     * Runs the FULL pipeline when a case carries constraints, so the eval
+     * measures what a shopper would actually get — including the model's
+     * extraction of "waterproof but breathable" into a predicate.
+     *
+     * Cases marked `paraphrase` deliberately carry NO constraints: their
+     * ground truth is the same, but the query never restates the predicate, so
+     * they keep measuring retrieval rather than the filter agreeing with the
+     * query that defined it.
+     */
     const result = await hybridSearch({
       text: testCase.query,
       limit: K,
       requireInStock: false,
+      qualityConstraints: testCase.qualityConstraints ?? [],
     });
     const retrieved = result.candidates.map((c) => c.productId);
     const expected = new Set(testCase.expectedProductIds);

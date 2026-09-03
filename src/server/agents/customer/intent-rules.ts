@@ -142,6 +142,8 @@ export function parseIntentWithRules(text: string, vocabulary: Vocabulary): Shop
     priority: detectPriority(text),
     currency: "INR",
     requireInStock: !wantsOutOfStock(text),
+    // The rule fallback cannot read feature requirements out of prose.
+    qualityConstraints: [],
     clarificationNeeded: hasVaguePlural(text)
       ? "You mentioned more than one but not how many. How many would you like?"
       : null,

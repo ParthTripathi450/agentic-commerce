@@ -28,6 +28,7 @@ const understanding = (
     suggestions: [],
     searchPhrase: "running shoes",
     priority: "balanced",
+    qualityConstraints: [],
     degraded: false,
     meta: {},
     ...rest,
