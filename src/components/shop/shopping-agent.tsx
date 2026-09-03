@@ -55,6 +55,14 @@ export function ShoppingAgent({
    */
   const [message, setMessage] = useState("");
   const [criteriaOrder, setCriteriaOrder] = useState<string[]>([]);
+  /**
+   * The feature the shopper asked to prioritise.
+   *
+   * Sent as a ranking input rather than appended to the message: "breathability"
+   * in the search text would change WHAT is retrieved, when the shopper meant
+   * to change how it is ORDERED.
+   */
+  const [focusQuality, setFocusQuality] = useState<string | null>(null);
   const [answered, setAnswered] = useState<string[]>([]);
   const [trail, setTrail] = useState<{ question: string; answer: string }[]>([]);
 
@@ -62,6 +70,7 @@ export function ShoppingAgent({
     message: string,
     answered: string[] = [],
     skipQuestions = false,
+    focusOverride?: string | null,
   ) {
     if (!message.trim()) return;
     setPending(true);
@@ -70,7 +79,7 @@ export function ShoppingAgent({
       const response = await fetch("/api/agent/shop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, answered, skipQuestions, history: [], criteriaOrder }),
+        body: JSON.stringify({ message, answered, skipQuestions, history: [], criteriaOrder, focusQuality: focusOverride ?? focusQuality }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -84,7 +93,7 @@ export function ShoppingAgent({
     } finally {
       setPending(false);
     }
-  }, [criteriaOrder]);
+  }, [criteriaOrder, focusQuality]);
 
   /**
    * Re-rank the SAME results under a new ordering.
@@ -134,11 +143,25 @@ export function ShoppingAgent({
   const answerQuestion = useCallback(
     (slotId: string, value: string) => {
       const label = turn?.question?.question ?? "";
-      const next = applyAnswer(message, slotId as SlotId, value);
       const nextAnswered = [...answered, slotId];
-      setMessage(next);
-      setAnswered(nextAnswered);
       setTrail((t) => [...t, { question: label, answer: value }]);
+      setAnswered(nextAnswered);
+
+      /*
+       * A focus answer changes the ORDER, not the search.
+       *
+       * Folding "breathability" into the message would change what gets
+       * retrieved, when the shopper only meant to say which of these results
+       * matters most to them.
+       */
+      if (slotId === "focus") {
+        setFocusQuality(value);
+        void run(message, nextAnswered, false, value);
+        return;
+      }
+
+      const next = applyAnswer(message, slotId as SlotId, value);
+      setMessage(next);
       void run(next, nextAnswered);
     },
     [answered, message, run, turn],

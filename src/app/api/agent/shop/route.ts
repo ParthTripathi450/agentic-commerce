@@ -20,6 +20,8 @@ const bodySchema = z.object({
     .array(z.enum(["price", "rating", "delivery", "returns", "reliability", "availability"]))
     .max(6)
     .default([]),
+  /** A rated feature to prioritise, or "balanced". */
+  focusQuality: z.string().max(40).nullish(),
   /** The conversation so far, oldest first, excluding `message`. */
   history: z
     .array(
@@ -62,6 +64,7 @@ export async function POST(request: Request) {
       skipQuestions: parsed.data.skipQuestions,
       history: parsed.data.history,
       criteriaOrder: parsed.data.criteriaOrder,
+      focusQuality: parsed.data.focusQuality ?? null,
     });
     return NextResponse.json(toTurnDto(turn));
   } catch (cause) {

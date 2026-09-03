@@ -22,13 +22,22 @@ export type PriceBucket = {
 
 export type Facets = {
   attributes: Record<string, FacetValue[]>;
+  /**
+   * Rated features these products carry, best average first.
+   *
+   * Offered as "what would you like me to prioritise?" — so the question can
+   * only ever name a feature the results are actually scored on.
+   */
+  ratedFeatures: { key: string; label: string; averageScore: number; products: number }[];
   priceBuckets: PriceBucket[];
   /** Cheapest and dearest in-stock variant, for phrasing the budget question. */
   priceRange: { minMinor: number; maxMinor: number } | null;
   inStockVariants: number;
 };
 
-const EMPTY: Facets = { attributes: {}, priceBuckets: [], priceRange: null, inStockVariants: 0 };
+const EMPTY: Facets = {
+  attributes: {}, ratedFeatures: [], priceBuckets: [], priceRange: null, inStockVariants: 0,
+};
 
 /**
  * Bands chosen from the real price distribution, not hardcoded.
@@ -137,8 +146,34 @@ export async function computeFacets(
 
   return {
     attributes,
+    ratedFeatures: await loadRatedFeatures(productIds),
     priceBuckets: bucketsFromPrices(prices),
     priceRange: { minMinor: Math.min(...prices), maxMinor: Math.max(...prices) },
     inStockVariants: rows.length,
   };
+}
+
+
+/** Which rated features these products publish, and how well they score. */
+async function loadRatedFeatures(productIds: string[]) {
+  if (productIds.length === 0) return [];
+
+  const rows = (await db.execute(sql`
+    SELECT q.key,
+           ROUND(AVG((q.value)::int), 2)::float AS avg_score,
+           count(*)::int AS products
+    FROM products p, jsonb_each_text(p.attributes->'qualities') AS q(key, value)
+    WHERE p.id IN ${productIds} AND p.status = 'active'
+    GROUP BY q.key
+    -- A feature only one product is rated on cannot separate the results.
+    HAVING count(*) >= 3
+    ORDER BY count(*) DESC, avg_score DESC
+  `)) as unknown as { key: string; avg_score: number; products: number }[];
+
+  return rows.map((r) => ({
+    key: r.key,
+    label: r.key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()).trim(),
+    averageScore: Number(r.avg_score),
+    products: Number(r.products),
+  }));
 }

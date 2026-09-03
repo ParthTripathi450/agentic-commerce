@@ -2,7 +2,7 @@ import { formatMoney } from "@/lib/money";
 import { hybridSearch, type SearchResult, type StructuredQuery } from "@/server/catalog/search";
 import { record, recordAndAdvance, startSession } from "@/server/audit/recorder";
 import { findAlternatives, type Alternative } from "./alternatives";
-import { computeFacets, type PriceBucket } from "@/server/catalog/facets";
+import { computeFacets, type Facets } from "@/server/catalog/facets";
 import { describeKnown, optionsForSlot, type SlotId } from "./clarify";
 import {
   intentFromUnderstanding,
@@ -206,6 +206,11 @@ export async function runShoppingTurn(input: {
    * implied", which is what most shoppers will never need to change.
    */
   criteriaOrder?: ShopperCriterion[];
+  /**
+   * A rated feature to prioritise, chosen from what the results carry.
+   * `"balanced"` means the shopper was asked and declined to single one out.
+   */
+  focusQuality?: string | null;
 }): Promise<ShoppingTurn> {
   const sessionId =
     input.sessionId ??
@@ -328,6 +333,17 @@ export async function runShoppingTurn(input: {
    * else is known, so the bands can be computed from products they might
    * actually buy rather than from the whole catalogue.
    */
+  /*
+   * The feature question, asked last.
+   *
+   * It only makes sense once the agent knows WHAT it is looking for: the
+   * features worth offering differ completely between running shoes and a
+   * frying pan, and they are read from what the recalled products are actually
+   * rated on rather than from a fixed list.
+   */
+  const focusUnknown =
+    !input.focusQuality && !(answered as string[]).includes("focus");
+
   const budgetUnknown =
     intent.priceMaxMinor === null &&
     intent.priceMinMinor === null &&
@@ -338,6 +354,13 @@ export async function runShoppingTurn(input: {
     budgetUnknown &&
     understanding.readyToSearch &&
     answered.length < MAX_TURNS;
+
+  const shouldAskFocus =
+    !input.skipQuestions &&
+    !shouldAskBudget &&
+    focusUnknown &&
+    understanding.readyToSearch &&
+    answered.length <= MAX_TURNS;
 
   /*
    * The model sometimes re-asks a topic it was told was covered. Repeating a
@@ -352,6 +375,7 @@ export async function runShoppingTurn(input: {
   const askAnything =
     !input.skipQuestions &&
     (shouldAskBudget ||
+      shouldAskFocus ||
       (!understanding.readyToSearch &&
         understanding.question !== null &&
         (!modelRepeatedItself || budgetUnknown)));
@@ -387,8 +411,12 @@ export async function runShoppingTurn(input: {
     const askingAbout =
       shouldAskBudget || (modelRepeatedItself && budgetUnknown)
         ? "budget"
-        : (understanding.questionAbout ?? "");
-    const questionText = askingAbout === "budget"
+        : shouldAskFocus
+          ? "focus"
+          : (understanding.questionAbout ?? "");
+    const questionText = askingAbout === "focus"
+      ? "Anything in particular you want me to prioritise? Pick a feature and I will weight it heavily, or take the balanced view."
+      : askingAbout === "budget"
       ? facets.priceRange
         ? `Last thing — what would you like to spend? These run from ${formatMoney(facets.priceRange.minMinor)} to ${formatMoney(facets.priceRange.maxMinor)}.`
         : "Last thing — what would you like to spend?"
@@ -586,9 +614,15 @@ export async function runShoppingTurn(input: {
   const rankStartedAt = Date.now();
   // A shopper's explicit ordering beats the preset the wording implied — they
   // said it outright, the preset was inferred.
+  // "balanced" is an answer, not an absence: the shopper was asked and chose
+  // not to single a feature out, so it must not re-trigger the question.
+  const focusQuality =
+    input.focusQuality && input.focusQuality !== "balanced" ? input.focusQuality : null;
+
   const ranking = rankCandidates(search.candidates, {
     priority: intent.priority,
     budgetMinor: intent.priceMaxMinor,
+    focusQuality,
     weights: input.criteriaOrder?.length ? weightsFromOrder(input.criteriaOrder) : undefined,
     rejected: search.rejected,
     limit: input.limit ?? 5,
@@ -683,9 +717,19 @@ export async function runShoppingTurn(input: {
  */
 function buildOptions(
   askingAbout: string,
-  facets: { attributes: Record<string, { value: string; label: string; count: number }[]>; priceBuckets: PriceBucket[] },
+  facets: Facets,
   fromModel: string[],
 ): { label: string; value: string }[] {
+  if (askingAbout === "focus") {
+    return [
+      ...facets.ratedFeatures.slice(0, 7).map((f) => ({
+        label: `${f.label} (avg ${f.averageScore.toFixed(1)}/5)`,
+        value: f.key,
+      })),
+      { label: "Balanced — weigh everything", value: "balanced" },
+    ];
+  }
+
   if (askingAbout === "budget") {
     return [
       ...facets.priceBuckets.map((b) => ({

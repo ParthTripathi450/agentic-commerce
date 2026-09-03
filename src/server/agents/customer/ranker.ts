@@ -16,6 +16,8 @@ import type { Candidate, Rejected } from "@/server/catalog/search";
 export type Priority = "balanced" | "cheapest" | "fastest" | "best_quality" | "most_flexible";
 
 export type Weights = {
+  /** Set when the shopper picked one rated feature to prioritise. */
+  focus?: number;
   relevance: number;
   price: number;
   availability: number;
@@ -161,6 +163,27 @@ function round(n: number, places = 4): number {
   return Math.round(n * f) / f;
 }
 
+/** Share of the score handed to a feature the shopper singled out. */
+const FOCUS_WEIGHT = 0.24;
+
+/**
+ * Makes room for a focused feature by scaling everything else down.
+ *
+ * Renormalising rather than just adding a criterion: weights that no longer sum
+ * to 1 make the scores incomparable between a focused search and an unfocused
+ * one, and the displayed percentages stop being percentages of anything.
+ */
+export function withFocus(weights: Weights, focusKey: string | null | undefined): Weights {
+  if (!focusKey) return weights;
+  const scale = 1 - FOCUS_WEIGHT;
+  const scaled = Object.fromEntries(
+    Object.entries(weights)
+      .filter(([k]) => k !== "focus")
+      .map(([k, v]) => [k, (v as number) * scale]),
+  ) as Weights;
+  return { ...scaled, focus: FOCUS_WEIGHT };
+}
+
 export function rankCandidates(
   candidates: Candidate[],
   options: {
@@ -169,10 +192,17 @@ export function rankCandidates(
     weights?: Partial<Weights>;
     rejected?: Rejected[];
     limit?: number;
+    /**
+     * A rated feature the shopper asked to prioritise, e.g. "breathability".
+     * Scored from the product's own 1–5 rating, alongside price rather than
+     * instead of it.
+     */
+    focusQuality?: string | null;
   } = {},
 ): RankingResult {
   const priority = options.priority ?? "balanced";
-  const weights: Weights = { ...WEIGHT_PRESETS[priority], ...options.weights };
+  const base: Weights = { ...WEIGHT_PRESETS[priority], ...options.weights };
+  const weights: Weights = withFocus(base, options.focusQuality);
 
   if (candidates.length === 0) {
     return { ranked: [], weights, priority, rejectedAlternatives: toRejectedAlternatives(options.rejected ?? []) };
@@ -287,9 +317,36 @@ export function rankCandidates(
       }],
     ];
 
+    /*
+     * The focused feature, scored from the product's own 1–5 rating.
+     *
+     * A product that does not publish the feature scores 0 rather than being
+     * excluded: the shopper asked to PRIORITISE it, not to require it, and
+     * dropping everything unrated would quietly narrow the search to whatever
+     * happens to carry that key.
+     */
+    if (options.focusQuality) {
+      const qualities = (candidate.attributes as { qualities?: Record<string, number> })?.qualities;
+      const score = qualities?.[options.focusQuality];
+      parts.push([
+        "focus",
+        {
+          name: options.focusQuality.replace(/([A-Z])/g, " $1").toLowerCase().trim(),
+          weight: weights.focus ?? 0,
+          value: score ?? 0,
+          normalized: score === undefined ? 0 : round((score - 1) / 4),
+          contribution: 0,
+          note:
+            score === undefined
+              ? "not rated for this feature"
+              : `${score}/5 — the feature you asked me to prioritise`,
+        },
+      ]);
+    }
+
     const criteria = parts.map(([key, criterion]) => ({
       ...criterion,
-      contribution: round(weights[key] * criterion.normalized),
+      contribution: round((weights[key as keyof Weights] ?? 0) * criterion.normalized),
     }));
 
     return {

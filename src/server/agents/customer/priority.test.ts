@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CRITERION_LABELS,
+  withFocus,
   SHOPPER_CRITERIA,
   WEIGHT_PRESETS,
   orderFromWeights,
@@ -80,5 +81,42 @@ describe("presented criteria", () => {
     expect(orderFromWeights(WEIGHT_PRESETS.fastest)[0]).toBe("delivery");
     expect(orderFromWeights(WEIGHT_PRESETS.most_flexible)[0]).toBe("returns");
     expect(orderFromWeights(WEIGHT_PRESETS.best_quality)[0]).toBe("rating");
+  });
+});
+
+
+describe("withFocus", () => {
+  it("still sums to 1, so scores stay comparable across searches", () => {
+    // Adding a criterion without renormalising would make a focused search's
+    // scores incomparable to an unfocused one, and the displayed percentages
+    // stop being percentages of anything.
+    const w = withFocus(WEIGHT_PRESETS.balanced, "breathability");
+    expect(Object.values(w).reduce((a, b) => a + (b ?? 0), 0)).toBeCloseTo(1, 6);
+  });
+
+  it("makes the focused feature the heaviest single criterion", () => {
+    const w = withFocus(WEIGHT_PRESETS.balanced, "breathability");
+    for (const [key, value] of Object.entries(w)) {
+      if (key !== "focus") expect(w.focus!).toBeGreaterThan(value ?? 0);
+    }
+  });
+
+  it("keeps price meaningful rather than crowding it out", () => {
+    // The shopper asked for the feature to matter ALONGSIDE price, not instead
+    // of it, so price must keep a real share of the score.
+    const w = withFocus(WEIGHT_PRESETS.balanced, "grip");
+    expect(w.price).toBeGreaterThan(0.1);
+  });
+
+  it("preserves the relative order of everything else", () => {
+    const base = WEIGHT_PRESETS.balanced;
+    const focused = withFocus(base, "durability");
+    expect(focused.rating > focused.reliability).toBe(base.rating > base.reliability);
+    expect(focused.reliability > focused.price).toBe(base.reliability > base.price);
+  });
+
+  it("is a no-op without a focus, so an unfocused search is untouched", () => {
+    expect(withFocus(WEIGHT_PRESETS.balanced, null)).toEqual(WEIGHT_PRESETS.balanced);
+    expect(withFocus(WEIGHT_PRESETS.balanced, undefined)).toEqual(WEIGHT_PRESETS.balanced);
   });
 });

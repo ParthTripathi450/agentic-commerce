@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ShieldCheck, ShoppingCart, X } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
@@ -69,6 +69,10 @@ export function AutonomousFlow({
   const [answered, setAnswered] = useState<string[]>([]);
   const [chips, setChips] = useState<{ label: string; value: string }[]>([]);
   const [chatting, setChatting] = useState(false);
+  /** A feature the shopper asked the agent to prioritise when choosing. */
+  const [focusQuality, setFocusQuality] = useState<string | null>(null);
+  /** Which question the agent last asked, so its answer is routed correctly. */
+  const pendingQuestion = useRef<string | null>(null);
   const [degraded, setDegraded] = useState(false);
 
   // Loaded up front: by the time the shopper clicks Allow, the widget must be
@@ -90,9 +94,20 @@ export function AutonomousFlow({
    * what it buys is what was actually discussed.
    */
   const send = useCallback(
-    async function send(text: string, opts: { skipQuestions?: boolean } = {}) {
+    async function send(
+      text: string,
+      opts: { skipQuestions?: boolean; focus?: string | null } = {},
+    ) {
       const trimmed = text.trim();
       if (!trimmed && !opts.skipQuestions) return;
+
+      // A focus answer changes how results are ORDERED, not what is searched.
+      let focus = opts.focus ?? focusQuality;
+      if (pendingQuestion.current === "focus" && trimmed) {
+        focus = trimmed;
+        setFocusQuality(trimmed);
+      }
+      pendingQuestion.current = null;
 
       if (trimmed) setMessages((m) => m.concat({ role: "shopper", content: trimmed }));
       setChips([]);
@@ -107,6 +122,7 @@ export function AutonomousFlow({
             answered,
             history,
             skipQuestions: opts.skipQuestions ?? false,
+            focusQuality: focus,
           }),
         });
         const data = await response.json();
@@ -120,6 +136,9 @@ export function AutonomousFlow({
         const nextHistory: ChatTurn[] = [...history, { role: "shopper", content: trimmed }];
 
         if (dto.outcome === "asking" && dto.question) {
+          // Remember which question this is, so the NEXT reply can be routed
+          // to the ranking rather than into the search text.
+          pendingQuestion.current = dto.question.id;
           setMessages((m) =>
             m.concat({
               role: "agent",
@@ -176,7 +195,7 @@ export function AutonomousFlow({
         setChatting(false);
       }
     },
-    [answered, history],
+    [answered, history, focusQuality],
   );
 
   const resetConversation = useCallback(() => {
