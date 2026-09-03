@@ -13,6 +13,7 @@ const customerNav = (cartCount: number): NavItem[] => [
   { href: "/shop", label: "Shop with AI", icon: "shop" },
   { href: "/cart", label: "Your cart", icon: "cart", badge: cartCount || undefined },
   { href: "/orders", label: "Your orders", icon: "orders" },
+  { href: "/reviews", label: "Your reviews", icon: "reviews" },
   { href: "/support", label: "Support", icon: "support" },
 ];
 
@@ -27,6 +28,7 @@ const MERCHANT_PRIMARY: NavItem[] = [
   { href: "/merchant/orders", label: "Orders", icon: "merchantOrders" },
   { href: "/merchant/promotions", label: "Promotions", icon: "promotions" },
   { href: "/merchant/insights", label: "Insights", icon: "insights" },
+  { href: "/merchant/reviews", label: "Reviews", icon: "reviews" },
 ];
 
 const MERCHANT_SECONDARY: NavItem[] = [

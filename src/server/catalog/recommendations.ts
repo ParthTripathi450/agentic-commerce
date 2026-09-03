@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { complementsFor } from "./complements";
 
 /**
  * "You might also like", grounded in real data.
@@ -165,26 +166,139 @@ export async function similarTo(productId: string, limit = 4): Promise<Recommend
 }
 
 /**
- * What to show after something goes in the cart.
+ * Best sellers from the categories that genuinely go WITH this one.
  *
- * Co-purchases lead because they are evidence of what people actually pair;
- * similarity fills the gap for a product nobody has bought yet, which is most
- * of a young catalogue.
+ * The fallback that matters. Co-purchase is the better signal but is far too
+ * sparse to cover the catalogue, and embedding similarity — the previous
+ * fallback — answers "what else is like this?", which after a purchase is the
+ * wrong question. It offered another pair of formal shoes to someone who had
+ * just bought formal shoes.
  */
+export async function goesWith(
+  productId: string,
+  category: string,
+  limit = 4,
+): Promise<Recommendation[]> {
+  const categories = complementsFor(category);
+  if (categories.length === 0) return [];
+
+  const rows = (await db.execute(sql`
+    WITH sold AS (
+      SELECT v.product_id, SUM(oi.quantity)::int AS units
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN product_variants v ON v.id = oi.variant_id
+      WHERE o.state IN ('paid','fulfilled')
+      GROUP BY v.product_id
+    )
+    ${SELECT}, p.category AS anchor_category, COALESCE(sold.units, 0) AS units
+    FROM products p
+    JOIN merchants m ON m.id = p.merchant_id
+    JOIN LATERAL (
+      SELECT v.* FROM product_variants v
+      JOIN inventory i ON i.variant_id = v.id
+      WHERE v.product_id = p.id AND v.active AND (i.quantity - i.reserved) > 0
+      ORDER BY v.price_minor ASC
+      LIMIT 1
+    ) v ON true
+    LEFT JOIN sold ON sold.product_id = p.id
+    WHERE p.status = 'active'
+      AND p.id <> ${productId}
+      AND p.category IN ${categories}
+    ORDER BY COALESCE(sold.units, 0) DESC, p.rating_bp DESC NULLS LAST
+    LIMIT ${limit * 6}
+  `)) as unknown as Row[];
+
+  return dedupe(
+    rows.map((r) => toRecommendation(r, `Goes with your ${category.toLowerCase()}`)),
+  ).slice(0, limit);
+}
+
+/**
+ * A genuine step up: same category, better rated, and more expensive.
+ *
+ * Both conditions matter. "More expensive" alone is not an upsell, it is just a
+ * bigger number; "better rated" alone is a cheaper recommendation the shopper
+ * would rather have found first. Only offering something that is both keeps the
+ * suggestion defensible.
+ */
+export async function upsellFrom(
+  productId: string,
+  category: string,
+  priceMinor: number,
+  limit = 2,
+): Promise<Recommendation[]> {
+  const rows = (await db.execute(sql`
+    ${SELECT}
+    FROM products p
+    JOIN merchants m ON m.id = p.merchant_id
+    JOIN LATERAL (
+      SELECT v.* FROM product_variants v
+      JOIN inventory i ON i.variant_id = v.id
+      WHERE v.product_id = p.id AND v.active AND (i.quantity - i.reserved) > 0
+        AND v.price_minor > ${priceMinor}
+      ORDER BY v.price_minor ASC
+      LIMIT 1
+    ) v ON true
+    WHERE p.status = 'active'
+      AND p.id <> ${productId}
+      AND p.category = ${category}
+      AND p.rating_bp IS NOT NULL
+      AND p.rating_bp >= (SELECT COALESCE(rating_bp, 0) FROM products WHERE id = ${productId})
+    ORDER BY p.rating_bp DESC, v.price_minor ASC
+    LIMIT ${limit * 6}
+  `)) as unknown as Row[];
+
+  return dedupe(rows.map((r) => toRecommendation(r, "A step up, rated higher"))).slice(0, limit);
+}
+
+export type Suggestions = {
+  /** Things that go WITH what they chose. */
+  crossSell: Recommendation[];
+  /** A better version of what they chose. */
+  upsell: Recommendation[];
+};
+
+/**
+ * What to show once something is chosen.
+ *
+ * Cross-sell leads with real co-purchase, then falls back to complementary
+ * categories. Similarity is deliberately NOT used here: it is the right answer
+ * to "show me alternatives" and the wrong one to "what now?".
+ */
+export async function suggestionsFor(
+  productId: string,
+  limit = 4,
+): Promise<Suggestions> {
+  const [anchor] = (await db.execute(sql`
+    SELECT p.title, p.category,
+           (SELECT MIN(v.price_minor) FROM product_variants v WHERE v.product_id = p.id) AS price_minor
+    FROM products p WHERE p.id = ${productId} LIMIT 1
+  `)) as unknown as { title: string; category: string; price_minor: number }[];
+
+  if (!anchor) return { crossSell: [], upsell: [] };
+  const anchorTitle = anchor.title.toLowerCase().trim();
+
+  const bought = await alsoBought(productId, limit);
+  const complementary = await goesWith(productId, anchor.category, limit);
+
+  const crossSell = dedupe([...bought, ...complementary])
+    .filter((r) => r.title.toLowerCase().trim() !== anchorTitle)
+    // Never cross-sell the same category — that is the bug this replaces.
+    .filter((r) => r.category !== anchor.category)
+    .slice(0, limit);
+
+  const upsell = (await upsellFrom(productId, anchor.category, Number(anchor.price_minor)))
+    .filter((r) => r.title.toLowerCase().trim() !== anchorTitle);
+
+  return { crossSell, upsell };
+}
+
+/** Back-compat: a flat list, cross-sell first. */
 export async function recommendationsFor(
   productId: string,
   limit = 4,
 ): Promise<Recommendation[]> {
-  const [anchor] = (await db.execute(sql`
-    SELECT title FROM products WHERE id = ${productId} LIMIT 1
-  `)) as unknown as { title: string }[];
-  const anchorTitle = anchor?.title.toLowerCase().trim() ?? "";
-
-  const bought = await alsoBought(productId, limit);
-  const similar = await similarTo(productId, limit * 2);
-
-  // The same product from another merchant is not a recommendation.
-  return dedupe([...bought, ...similar])
-    .filter((r) => r.title.toLowerCase().trim() !== anchorTitle)
-    .slice(0, limit);
+  const { crossSell, upsell } = await suggestionsFor(productId, limit);
+  return [...crossSell, ...upsell].slice(0, limit);
 }

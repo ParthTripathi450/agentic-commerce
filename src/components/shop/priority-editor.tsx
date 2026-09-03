@@ -64,6 +64,9 @@ export function PriorityEditor({
             <span className="block truncate text-xs text-muted-foreground">
               {order.map((c) => c.label).join(" › ")}
             </span>
+            <span className="block text-xs text-primary">
+              Open to change what matters most — use the ▲ ▼ arrows
+            </span>
           </span>
           <ChevronDown
             className={cn("size-4 shrink-0 text-primary transition-transform", open && "rotate-180")}
@@ -73,7 +76,8 @@ export function PriorityEditor({
         {open ? (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Most important first. Drag a row, or use the arrows. Matching what you asked for is
+              Most important first. <strong>Click the ▲ ▼ arrows on any row to move it</strong>, or
+              drag it — then press <em>Re-rank with this order</em>. Matching what you asked for is
               always weighted first and is not in this list.
             </p>
 

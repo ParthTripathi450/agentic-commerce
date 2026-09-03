@@ -128,3 +128,167 @@ export async function getMerchantReviewsByOrder(orderIds: string[]) {
     .where(inArray(merchantReviews.orderId, orderIds));
   return new Map(rows.map((r) => [r.orderId, { ratingBp: r.ratingBp, comment: r.comment }]));
 }
+
+export type ReviewWithContext = {
+  id: string;
+  productId: string;
+  productTitle: string;
+  category: string;
+  merchantName: string;
+  authorName: string;
+  ratingBp: number;
+  title: string | null;
+  body: string | null;
+  createdAt: Date;
+  variantAttributes: Record<string, string>;
+};
+
+export type RatingBreakdown = {
+  total: number;
+  averageBp: number;
+  /** Count per star, 1–5. */
+  histogram: Record<number, number>;
+};
+
+function toBreakdown(rows: { rating_bp: number; n: number }[]): RatingBreakdown {
+  const histogram: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  let total = 0;
+  let weighted = 0;
+  for (const row of rows) {
+    const star = Math.max(1, Math.min(5, Math.round(Number(row.rating_bp) / 1000)));
+    histogram[star] += Number(row.n);
+    total += Number(row.n);
+    weighted += Number(row.rating_bp) * Number(row.n);
+  }
+  return { total, averageBp: total ? Math.round(weighted / total) : 0, histogram };
+}
+
+/**
+ * Reviews of one product, newest first, with who wrote them.
+ *
+ * The catalogue carries thousands of reviews that nothing rendered — a shopper
+ * asking "is this breathable?" had the answer sitting in the database and no
+ * way to read it.
+ */
+export async function getProductReviewsDetailed(
+  productId: string,
+  limit = 20,
+): Promise<{ reviews: ReviewWithContext[]; breakdown: RatingBreakdown }> {
+  const rows = (await db.execute(sql`
+    SELECT r.id, r.product_id, r.rating_bp, r.title, r.body, r.created_at,
+           p.title AS product_title, p.category,
+           m.name AS merchant_name,
+           COALESCE(u.name, 'Verified buyer') AS author_name,
+           v.attributes AS variant_attributes
+    FROM product_reviews r
+    JOIN products p ON p.id = r.product_id
+    JOIN merchants m ON m.id = r.merchant_id
+    JOIN users u ON u.id = r.user_id
+    JOIN product_variants v ON v.id = r.variant_id
+    WHERE r.product_id = ${productId}
+    ORDER BY r.created_at DESC
+    LIMIT ${limit}
+  `)) as unknown as Record<string, unknown>[];
+
+  const counts = (await db.execute(sql`
+    SELECT rating_bp, count(*)::int AS n FROM product_reviews
+    WHERE product_id = ${productId} GROUP BY rating_bp
+  `)) as unknown as { rating_bp: number; n: number }[];
+
+  return {
+    reviews: rows.map((r) => ({
+      id: String(r.id),
+      productId: String(r.product_id),
+      productTitle: String(r.product_title),
+      category: String(r.category),
+      merchantName: String(r.merchant_name),
+      authorName: String(r.author_name),
+      ratingBp: Number(r.rating_bp),
+      title: r.title === null ? null : String(r.title),
+      body: r.body === null ? null : String(r.body),
+      createdAt: new Date(r.created_at as string),
+      variantAttributes: (r.variant_attributes ?? {}) as Record<string, string>,
+    })),
+    breakdown: toBreakdown(counts),
+  };
+}
+
+/** Every review left on a merchant's products, newest first. */
+export async function getMerchantProductReviews(
+  merchantId: string,
+  options: { limit?: number; maxStars?: number } = {},
+): Promise<{ reviews: ReviewWithContext[]; breakdown: RatingBreakdown }> {
+  const limit = options.limit ?? 50;
+  const ceiling = options.maxStars ? options.maxStars * 1000 + 999 : 5999;
+
+  const rows = (await db.execute(sql`
+    SELECT r.id, r.product_id, r.rating_bp, r.title, r.body, r.created_at,
+           p.title AS product_title, p.category,
+           m.name AS merchant_name,
+           COALESCE(u.name, 'Verified buyer') AS author_name,
+           v.attributes AS variant_attributes
+    FROM product_reviews r
+    JOIN products p ON p.id = r.product_id
+    JOIN merchants m ON m.id = r.merchant_id
+    JOIN users u ON u.id = r.user_id
+    JOIN product_variants v ON v.id = r.variant_id
+    WHERE r.merchant_id = ${merchantId} AND r.rating_bp <= ${ceiling}
+    ORDER BY r.created_at DESC
+    LIMIT ${limit}
+  `)) as unknown as Record<string, unknown>[];
+
+  const counts = (await db.execute(sql`
+    SELECT rating_bp, count(*)::int AS n FROM product_reviews
+    WHERE merchant_id = ${merchantId} GROUP BY rating_bp
+  `)) as unknown as { rating_bp: number; n: number }[];
+
+  return {
+    reviews: rows.map((r) => ({
+      id: String(r.id),
+      productId: String(r.product_id),
+      productTitle: String(r.product_title),
+      category: String(r.category),
+      merchantName: String(r.merchant_name),
+      authorName: String(r.author_name),
+      ratingBp: Number(r.rating_bp),
+      title: r.title === null ? null : String(r.title),
+      body: r.body === null ? null : String(r.body),
+      createdAt: new Date(r.created_at as string),
+      variantAttributes: (r.variant_attributes ?? {}) as Record<string, string>,
+    })),
+    breakdown: toBreakdown(counts),
+  };
+}
+
+/** Reviews this shopper has written. */
+export async function getReviewsByUser(userId: string, limit = 50): Promise<ReviewWithContext[]> {
+  const rows = (await db.execute(sql`
+    SELECT r.id, r.product_id, r.rating_bp, r.title, r.body, r.created_at,
+           p.title AS product_title, p.category,
+           m.name AS merchant_name,
+           COALESCE(u.name, 'You') AS author_name,
+           v.attributes AS variant_attributes
+    FROM product_reviews r
+    JOIN products p ON p.id = r.product_id
+    JOIN merchants m ON m.id = r.merchant_id
+    JOIN users u ON u.id = r.user_id
+    JOIN product_variants v ON v.id = r.variant_id
+    WHERE r.user_id = ${userId}
+    ORDER BY r.created_at DESC
+    LIMIT ${limit}
+  `)) as unknown as Record<string, unknown>[];
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    productId: String(r.product_id),
+    productTitle: String(r.product_title),
+    category: String(r.category),
+    merchantName: String(r.merchant_name),
+    authorName: String(r.author_name),
+    ratingBp: Number(r.rating_bp),
+    title: r.title === null ? null : String(r.title),
+    body: r.body === null ? null : String(r.body),
+    createdAt: new Date(r.created_at as string),
+    variantAttributes: (r.variant_attributes ?? {}) as Record<string, string>,
+  }));
+}

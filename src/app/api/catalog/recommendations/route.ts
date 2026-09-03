@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { recommendationsFor } from "@/server/catalog/recommendations";
+import { suggestionsFor } from "@/server/catalog/recommendations";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +17,10 @@ export async function POST(request: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
   try {
-    return NextResponse.json({
-      recommendations: await recommendationsFor(parsed.data.productId, parsed.data.limit),
-    });
+    const { crossSell, upsell } = await suggestionsFor(parsed.data.productId, parsed.data.limit);
+    // Two different questions, kept apart: what goes WITH this, and what is a
+    // better version of it.
+    return NextResponse.json({ crossSell, upsell, recommendations: crossSell });
   } catch (cause) {
     return NextResponse.json({ error: (cause as Error).message }, { status: 500 });
   }

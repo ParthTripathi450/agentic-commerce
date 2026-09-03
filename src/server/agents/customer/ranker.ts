@@ -25,9 +25,16 @@ export type Weights = {
   rating: number;
 };
 
-/** Weight presets. A stated shopper priority visibly re-weights the ranking. */
+/**
+ * Weight presets. A stated shopper priority visibly re-weights the ranking.
+ *
+ * `balanced` puts **reliability directly behind rating**: a highly-rated
+ * product from a seller who does not actually fulfil is worth less than a
+ * slightly worse one that arrives. Price still matters, but it no longer
+ * outranks whether the order will be honoured.
+ */
 export const WEIGHT_PRESETS: Record<Priority, Weights> = {
-  balanced:      { relevance: 0.22, price: 0.22, availability: 0.10, delivery: 0.10, returns: 0.08, reliability: 0.08, rating: 0.20 },
+  balanced:      { relevance: 0.22, price: 0.18, availability: 0.06, delivery: 0.07, returns: 0.06, reliability: 0.19, rating: 0.22 },
   cheapest:      { relevance: 0.12, price: 0.58, availability: 0.08, delivery: 0.06, returns: 0.04, reliability: 0.04, rating: 0.08 },
   fastest:       { relevance: 0.16, price: 0.12, availability: 0.18, delivery: 0.28, returns: 0.06, reliability: 0.10, rating: 0.10 },
   best_quality:  { relevance: 0.18, price: 0.08, availability: 0.08, delivery: 0.06, returns: 0.10, reliability: 0.20, rating: 0.30 },

@@ -13,7 +13,7 @@ export default async function ShopPage({
   const user = await requireCustomer();
   const { q } = await searchParams;
   const [featured, method] = await Promise.all([
-    getFeaturedProducts(8),
+    getFeaturedProducts(24),
     getDefaultPaymentMethod(user.id),
   ]);
   const status = providerStatus();

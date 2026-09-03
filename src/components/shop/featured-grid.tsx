@@ -21,7 +21,7 @@ export function FeaturedGrid({ products }: { products: FeaturedProduct[] }) {
     <section className="mt-8">
       <h2 className="text-sm font-semibold">Popular across the marketplace</h2>
       <p className="mt-0.5 mb-4 text-sm text-muted-foreground">
-        Ranked by units sold in the last 30 days. Pick one to see it in full.
+        Ranked by units actually sold in the last 30 days. Pick one to see it in full.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

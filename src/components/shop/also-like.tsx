@@ -11,6 +11,7 @@ import { addToCartAction } from "@/server/commerce/cart-actions";
 
 type Recommendation = {
   productId: string;
+  category: string;
   variantId: string;
   title: string;
   brand: string | null;
@@ -30,6 +31,7 @@ type Recommendation = {
  */
 export function AlsoLike({ productId, title }: { productId: string; title: string }) {
   const [items, setItems] = useState<Recommendation[]>([]);
+  const [upsell, setUpsell] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,10 +44,15 @@ export function AlsoLike({ productId, title }: { productId: string; title: strin
     })
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled) setItems(d.recommendations ?? []);
+        if (cancelled) return;
+        setItems(d.crossSell ?? d.recommendations ?? []);
+        setUpsell(d.upsell ?? []);
       })
       .catch(() => {
-        if (!cancelled) setItems([]);
+        if (!cancelled) {
+          setItems([]);
+          setUpsell([]);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -55,24 +62,47 @@ export function AlsoLike({ productId, title }: { productId: string; title: strin
     };
   }, [productId]);
 
-  if (loading || items.length === 0) return null;
+  if (loading || (items.length === 0 && upsell.length === 0)) return null;
 
   return (
-    <Card>
-      <CardBody className="space-y-3">
-        <div>
-          <p className="text-sm font-semibold">Goes with {title}</p>
-          <p className="text-xs text-muted-foreground">
-            From what other shoppers bought alongside it.
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {items.map((item) => (
-            <RecommendationCard key={item.variantId} item={item} />
-          ))}
-        </div>
-      </CardBody>
-    </Card>
+    <div className="space-y-4">
+      {items.length > 0 ? (
+        <Card>
+          <CardBody className="space-y-3">
+            <div>
+              <p className="text-sm font-semibold">Goes with {title}</p>
+              <p className="text-xs text-muted-foreground">
+                Complementary items — what people actually pair with this, not more of the same.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {items.map((item) => (
+                <RecommendationCard key={item.variantId} item={item} />
+              ))}
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {upsell.length > 0 ? (
+        <Card>
+          <CardBody className="space-y-3">
+            <div>
+              <p className="text-sm font-semibold">A step up</p>
+              <p className="text-xs text-muted-foreground">
+                Rated higher than what you picked, and priced accordingly — shown so the choice is
+                yours rather than hidden.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {upsell.map((item) => (
+                <RecommendationCard key={item.variantId} item={item} />
+              ))}
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+    </div>
   );
 }
 

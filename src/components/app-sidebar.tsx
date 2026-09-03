@@ -19,6 +19,7 @@ import {
   Sparkles,
   Store,
   Tags,
+  Star,
 } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui";
@@ -47,6 +48,7 @@ const ICONS = {
   cart: ShoppingCart,
   support: LifeBuoy,
   store: Store,
+  reviews: Star,
 } satisfies Record<string, LucideIcon>;
 
 export function AppSidebar({
