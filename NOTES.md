@@ -146,6 +146,21 @@ hard filters (attributes, price, stock, sale window, merchant allow/deny) applie
 Rejected products are returned in `rejected[]` **with a specific reason** — that is what lets the
 agent say why the cheap option wasn't chosen.
 
+**The lexical leg ORs its terms when ANDing them finds nothing.** `websearch_to_tsquery` ANDs
+everything, which silently killed the entire lexical half of the "hybrid" search for conversational
+input: "shoes I can play tennis in" required all those words together and matched **0 of 503**
+documents, while "tennis" alone matches exactly the 13 court shoes. Every natural-language query —
+the primary way anyone talks to this agent — was therefore ranked by the embedding alone. AND stays
+first because it is right for keyword input and the eval says so (forcing OR everywhere cost 0.011
+recall); the OR fallback fires only when AND matched nothing, and carries `LEX_FALLBACK_CONFIDENCE
+= 0.4` in the fusion because a broad term like "shoes" matches a third of the catalogue.
+
+**`tagsText` carries the purpose attributes, not just `searchTags`.** `searchTags` is empty for every
+seeded product, so the weight-'A' band went unused while `useCase` — the one field that says what a
+product is FOR — sat in `ai_text` at weight 'B'. `useCase`, `use`, `style`, `activity`, `fit` and
+`features` are now promoted. This is weighting, never filtering: §8.8 is about a GUESSED category
+becoming a hard filter, whereas this ranks a field the merchant wrote and can never remove a product.
+
 **Relevance gate (anti-hallucination):**
 - `MIN_TOP_RELEVANCE = 0.34`. Measured on this catalog: stocked items score 0.369–0.721 for a plain
   description; unstocked queries top out at 0.307. 0.34 sits in that gap.
@@ -240,7 +255,11 @@ reordered by drag OR by up/down buttons; the buttons are the real control, since
 unusable by keyboard. `weightsFromOrder()` is rank-proportional, so reordering shifts the ranking
 without collapsing it into a single sort key, and a partial order is still valid.
 **`relevance` is not in the list** — it is not a preference, it is what keeps results about the
-thing that was asked for. A reorder replays the query rather than re-sorting client-side, so the
+thing that was asked for. **That is enforced, not just stated:** `withFocus` and
+`withAffinity` carve their share out of the PREFERENCES only and leave relevance untouched. They used
+to scale it down like everything else, so a shopper who asked for tennis shoes, chose "comfort" and
+had a taste profile got relevance weighted at 0.142 — at which point a cheap, comfortable casual
+sneaker outscores an actual court shoe, which is exactly what happened. A reorder replays the query rather than re-sorting client-side, so the
 score breakdown and explanation are regenerated from the new weights.
 
 ### Refining one product (`server/agents/customer/refine.ts`)
@@ -599,6 +618,17 @@ never silently dropped from a combined total.
     because a marketplace that sells kitchen appliances IS nearer to "washing machine". Re-measure
     after any material catalogue change; never raise it to block a query, because that starts
     refusing products you actually sell ("noise cancelling headphones" sits at 0.373).
+33. **A min-max normalised criterion cannot carry a fixed threshold.** A relevance gate keyed off
+    `criteria.normalized` looked right on a 60-candidate search and cut the entire result set on a
+    small one: normalisation is min-max across the survivors, so with two candidates the runner-up
+    is 0 BY CONSTRUCTION however close it really was. Thresholds belong on raw scores.
+34. **RRF scores are rank-based and decay steeply, so ratios of them are a blunt instrument.**
+    Measured on "black running shoes for daily road training": top 1.00, then genuinely relevant
+    running shoes at 0.43, 0.39, 0.33, a walking shoe at 0.29 and a sandal at 0.27. Any ratio strict
+    enough to exclude an off-topic item also excludes legitimate ones. A relevance gate built this
+    way was tried, measured and REMOVED — the fix for off-topic results was making the lexical leg
+    work, not post-filtering the ranking.
+
 30. **Boilerplate in a chunk is what the embedding learns.** Evidence chunks were built as
     `"Review of <product> (<category>) — <n> out of 5. <title> <body>"`. On a two-line review that
     prefix is half the tokens, so the vector encoded the template every chunk shares instead of the

@@ -170,6 +170,7 @@ function round(n: number, places = 4): number {
 /** Share of the score handed to a feature the shopper singled out. */
 const FOCUS_WEIGHT = 0.24;
 
+
 /**
  * Makes room for a focused feature by scaling everything else down.
  *
@@ -177,15 +178,40 @@ const FOCUS_WEIGHT = 0.24;
  * to 1 make the scores incomparable between a focused search and an unfocused
  * one, and the displayed percentages stop being percentages of anything.
  */
+/**
+ * Carves out a share for a new criterion, taking it from the PREFERENCES only.
+ *
+ * `relevance` is deliberately exempt, for the reason stated where
+ * `SHOPPER_CRITERIA` is defined: it is not a preference, it is what keeps the
+ * ranking about the thing that was asked for. Diluting it to make room for a
+ * focused feature meant a shopper who asked for tennis shoes and prioritised
+ * comfort had relevance weighted at 0.167 — and with a taste profile too,
+ * 0.142. At that point a cheap, comfortable casual sneaker outscores an actual
+ * court shoe, which is exactly what happened.
+ *
+ * Everything else is scaled proportionally so the weights still sum to 1 and
+ * the displayed contributions remain percentages of something real.
+ */
+function carve(weights: Weights, key: "focus" | "affinity", share: number): Weights {
+  const protectedTotal = weights.relevance;
+  const flexible = Object.entries(weights).filter(
+    ([k]) => k !== key && k !== "relevance",
+  ) as [string, number][];
+
+  const flexibleTotal = flexible.reduce((sum, [, v]) => sum + v, 0);
+  const room = Math.max(0, 1 - protectedTotal - share);
+  const scale = flexibleTotal > 0 ? room / flexibleTotal : 0;
+
+  const scaled = Object.fromEntries(
+    flexible.map(([k, v]) => [k, v * scale]),
+  ) as Omit<Weights, "relevance">;
+
+  return { ...scaled, relevance: protectedTotal, [key]: share } as Weights;
+}
+
 export function withFocus(weights: Weights, focusKey: string | null | undefined): Weights {
   if (!focusKey) return weights;
-  const scale = 1 - FOCUS_WEIGHT;
-  const scaled = Object.fromEntries(
-    Object.entries(weights)
-      .filter(([k]) => k !== "focus")
-      .map(([k, v]) => [k, (v as number) * scale]),
-  ) as Weights;
-  return { ...scaled, focus: FOCUS_WEIGHT };
+  return carve(weights, "focus", FOCUS_WEIGHT);
 }
 
 /**
@@ -197,13 +223,7 @@ export function withFocus(weights: Weights, focusKey: string | null | undefined)
  */
 export function withAffinity(weights: Weights, enabled: boolean): Weights {
   if (!enabled) return weights;
-  const scale = 1 - AFFINITY_WEIGHT;
-  const scaled = Object.fromEntries(
-    Object.entries(weights)
-      .filter(([k]) => k !== "affinity")
-      .map(([k, v]) => [k, (v as number) * scale]),
-  ) as Weights;
-  return { ...scaled, affinity: AFFINITY_WEIGHT };
+  return carve(weights, "affinity", AFFINITY_WEIGHT);
 }
 
 export function rankCandidates(

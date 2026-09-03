@@ -141,6 +141,18 @@ export type SearchResult = {
 };
 
 const RRF_K = 60;
+
+/**
+ * How much the OR fallback counts against a precise AND match.
+ *
+ * It is a rescue, not an equal: ORing a sentence's terms lets a broad word like
+ * "shoes" match a third of the catalogue, and at full weight that noise cost
+ * measurable recall on queries that describe a need without naming a product
+ * ("my feet get unbearably hot"). Discounted, it still rescues the queries that
+ * matched nothing at all while leaving the ranking to the embedding where the
+ * lexical signal is genuinely weak.
+ */
+const LEX_FALLBACK_CONFIDENCE = 0.4;
 const DEFAULT_RECALL = 60;
 
 /**
@@ -253,10 +265,48 @@ function buildQualityFilter(constraints: QualityConstraint[] | undefined) {
   return sql` AND ${sql.join(clauses, sql` AND `)}`;
 }
 
+/**
+ * Free text as a lexical query that ORs its terms, ranked by how many hit.
+ *
+ * `websearch_to_tsquery` ANDs everything, which quietly killed the entire
+ * lexical leg for conversational input: "shoes I can play tennis in" required
+ * shoes AND play AND tennis AND... and matched **0 of 503** documents, while
+ * "tennis" alone matches exactly the 13 court shoes. Every natural-language
+ * query — which is the primary way anyone talks to this agent — was therefore
+ * ranked by the embedding alone, and the weighted A/B tsvector that exists to
+ * make a title or tag match beat a body match was doing nothing at all.
+ *
+ * OR is the right semantics BECAUSE of `ts_rank`: a document matching "tennis"
+ * and "shoes" outranks one matching only "shoes", so breadth of match becomes a
+ * ranking signal instead of a precondition for appearing.
+ *
+ * Tokens are reduced to `[a-z0-9]+` before they reach `to_tsquery`, which unlike
+ * the `websearch_` and `plainto_` forms parses operator syntax and would throw
+ * on a stray `&`, `|` or quote in a shopper's sentence.
+ */
+const LEXICAL_STOPWORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "you", "your", "can", "could",
+  "would", "some", "something", "anything", "want", "need", "looking", "look",
+  "buy", "get", "give", "show", "find", "have", "has", "are", "was", "were",
+  "but", "not", "any", "all", "from", "into", "out", "who", "what", "which",
+  "when", "where", "how", "please", "thanks", "good", "nice", "best", "very",
+]);
+
+function orTsQuery(text: string): string {
+  const terms = (text.toLowerCase().match(/[a-z0-9]+/g) ?? [])
+    .filter((t) => t.length >= 3 && !LEXICAL_STOPWORDS.has(t));
+
+  // Nothing usable left — a query of only stopwords must match nothing rather
+  // than everything, so the vector leg decides on its own.
+  const unique = [...new Set(terms)];
+  return unique.length > 0 ? unique.join(" | ") : "zzzznomatchzzzz";
+}
+
 /** Recall stage: semantic + lexical, fused by Reciprocal Rank Fusion. */
 async function recall(query: StructuredQuery, k: number): Promise<FusionRow[]> {
   const vector = await embedOne(query.text);
   const literal = JSON.stringify(vector);
+  const lexical = orTsQuery(query.text);
 
   /*
    * Rated-feature constraints are a PRE-filter, not a post-filter.
@@ -283,21 +333,55 @@ async function recall(query: StructuredQuery, k: number): Promise<FusionRow[]> {
       ORDER BY cd.embedding <=> ${literal}::vector
       LIMIT ${k}
     ),
-    lex AS (
-      SELECT cd.product_id,
-             ROW_NUMBER() OVER (ORDER BY ts_rank(cd.search_vector, q) DESC) AS rank,
-             ts_rank(cd.search_vector, q) AS score
+    /*
+     * Precise first, broad only if precise found nothing.
+     *
+     * ANDing every term is the right lexical query when the shopper types
+     * keywords, and the eval says so — forcing OR everywhere cost 0.011 recall
+     * by letting a broad term like "shoes" drag two hundred loose matches into
+     * the fusion. But AND is catastrophic for a sentence: "shoes I can play
+     * tennis in" required all of those words together and matched 0 of 503, so
+     * the lexical leg silently contributed NOTHING to every conversational
+     * query, which is the main way anyone talks to this agent.
+     *
+     * The fallback keeps both behaviours honest. Precise queries are unchanged;
+     * a sentence that would have matched nothing now falls back to OR, where
+     * ts_rank turns breadth of match into a ranking signal rather than a
+     * precondition.
+     */
+    lex_and AS (
+      SELECT cd.product_id, ts_rank(cd.search_vector, q) AS score
       FROM catalog_documents cd
       JOIN eligible e ON e.id = cd.product_id,
            websearch_to_tsquery('english', ${query.text}) q
       WHERE cd.search_vector @@ q
       ORDER BY score DESC
       LIMIT ${k}
+    ),
+    lex_or AS (
+      SELECT cd.product_id, ts_rank(cd.search_vector, q) AS score
+      FROM catalog_documents cd
+      JOIN eligible e ON e.id = cd.product_id,
+           to_tsquery('english', ${lexical}) q
+      WHERE cd.search_vector @@ q
+        AND NOT EXISTS (SELECT 1 FROM lex_and)
+      ORDER BY score DESC
+      LIMIT ${k}
+    ),
+    lex AS (
+      SELECT product_id, score, confidence,
+             ROW_NUMBER() OVER (ORDER BY score DESC) AS rank
+      FROM (
+        SELECT product_id, score, 1.0 AS confidence FROM lex_and
+        UNION ALL
+        SELECT product_id, score, ${LEX_FALLBACK_CONFIDENCE} FROM lex_or
+      ) merged
     )
     SELECT COALESCE(v.product_id, l.product_id) AS product_id,
            v.score AS vec_score,
            l.score AS lex_score,
-           COALESCE(1.0 / (${RRF_K} + v.rank), 0) + COALESCE(1.0 / (${RRF_K} + l.rank), 0) AS rrf
+           COALESCE(1.0 / (${RRF_K} + v.rank), 0)
+             + COALESCE(l.confidence / (${RRF_K} + l.rank), 0) AS rrf
     FROM vec v
     FULL OUTER JOIN lex l ON v.product_id = l.product_id
     ORDER BY rrf DESC
