@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic Commerce Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+  /* ---------------------------------------------------------------- tokens
+     Palette is the application's own, pinned in NOTES.md: the sidebar navy,
+     the primary violet, the agent CTA deep violet, and the best-match gold —
+     which is reserved here exactly as it is in the product, for the one thing
+     that has been measured rather than asserted. */
+  :root {
+    --ink:        #101828;
+    --ink-2:      #1d2739;
+    --paper:      #f7f8fa;
+    --surface:    #ffffff;
+    --violet:     #7f56d9;
+    --violet-deep:#3e0f8d;
+    --gold:       #e4da72;
+    --gold-ink:   #3a3410;
+
+    --text:       #161924;
+    --text-muted: #5b607a;
+    --text-faint: #878ca6;
+    --line:       #e3e2ef;
+    --line-soft:  #eeedf6;
+
+    --ok:         #17795e;
+    --warn:       #9a6b00;
+    --stop:       #b3261e;
+
+    --rail-bg:    var(--ink);
+    --rail-text:  #c9cee0;
+    --rail-active:#ffffff;
+
+    --measure: 68ch;
+    --step--1: .8125rem;
+    --step-0:  1.0rem;
+    --step-1:  1.1875rem;
+    --step-2:  1.5rem;
+    --step-3:  2.0rem;
+    --step-4:  2.75rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0d1017;
+      --surface:    #151a25;
+      --text:       #e7e9f2;
+      --text-muted: #a3a9c0;
+      --text-faint: #7f859c;
+      --line:       #2a3040;
+      --line-soft:  #212736;
+      --violet:     #a98bec;
+      --violet-deep:#c0a6f5;
+      --gold:       #e4da72;
+      --gold-ink:   #2a2608;
+      --ok:         #4ecfa5;
+      --warn:       #e0b055;
+      --stop:       #f0837a;
+      --rail-bg:    #070a10;
+      --rail-text:  #949bb4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0d1017;
+    --surface:    #151a25;
+    --text:       #e7e9f2;
+    --text-muted: #a3a9c0;
+    --text-faint: #7f859c;
+    --line:       #2a3040;
+    --line-soft:  #212736;
+    --violet:     #a98bec;
+    --violet-deep:#c0a6f5;
+    --gold:       #e4da72;
+    --gold-ink:   #2a2608;
+    --ok:         #4ecfa5;
+    --warn:       #e0b055;
+    --stop:       #f0837a;
+    --rail-bg:    #070a10;
+    --rail-text:  #949bb4;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--text);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: var(--step-0);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell { display: grid; grid-template-columns: 1fr; }
+  @media (min-width: 62rem) {
+    .shell { grid-template-columns: 16.5rem minmax(0, 1fr); }
+  }
+
+  /* ------------------------------------------------------------------ rail */
+  .rail {
+    background: var(--rail-bg);
+    color: var(--rail-text);
+    padding: 2rem 1.5rem;
+    display: flex; flex-direction: column; gap: 1.75rem;
+  }
+  @media (min-width: 62rem) {
+    .rail { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  }
+  .rail__mark {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .6875rem; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--gold);
+  }
+  .rail__title {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: 1.375rem; line-height: 1.2; color: var(--rail-active);
+    margin: .4rem 0 0;
+  }
+  .rail__sub { font-size: var(--step--1); margin: .5rem 0 0; }
+  .rail nav ol { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; counter-reset: sec; }
+  .rail nav a {
+    display: flex; gap: .7rem; align-items: baseline;
+    color: var(--rail-text); text-decoration: none;
+    padding: .38rem .5rem; border-radius: 4px;
+    font-size: var(--step--1);
+    border-left: 2px solid transparent;
+  }
+  .rail nav a:hover, .rail nav a:focus-visible { color: var(--rail-active); background: rgba(255,255,255,.06); }
+  .rail nav a::before {
+    counter-increment: sec; content: counter(sec, decimal-leading-zero);
+    font-family: "IBM Plex Mono", monospace; font-size: .6875rem;
+    color: var(--text-faint); flex: none;
+  }
+  .rail__foot {
+    margin-top: auto; font-size: .75rem; color: var(--text-faint);
+    font-family: "IBM Plex Mono", monospace; line-height: 1.7;
+  }
+
+  /* --------------------------------------------------------------- content */
+  main { padding: 3rem 1.5rem 6rem; }
+  @media (min-width: 48rem) { main { padding: 4.5rem 3.5rem 7rem; } }
+  .wrap { max-width: 58rem; margin: 0 auto; display: grid; gap: 4.5rem; }
+
+  .lede { display: grid; gap: 1.25rem; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .6875rem; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--violet); margin: 0;
+  }
+  h1 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: var(--step-4); line-height: 1.08; letter-spacing: -.02em;
+    margin: 0; text-wrap: balance; font-weight: 600;
+  }
+  .standfirst {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: var(--step-1); line-height: 1.55; color: var(--text-muted);
+    max-width: var(--measure); margin: 0;
+  }
+  h2 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: var(--step-3); line-height: 1.15; letter-spacing: -.015em;
+    margin: 0 0 .5rem; font-weight: 600; text-wrap: balance;
+  }
+  h3 {
+    font-size: var(--step-1); margin: 0 0 .35rem; font-weight: 600;
+    letter-spacing: -.005em;
+  }
+  p { max-width: var(--measure); margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+  section > p:first-of-type { margin-top: .25rem; }
+  a { color: var(--violet); }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .875em;
+  }
+  code { background: var(--line-soft); padding: .1em .35em; border-radius: 3px; }
+
+  .section-head { border-top: 1px solid var(--line); padding-top: 1.75rem; }
+
+  /* The pipeline is the one genuinely ordered thing here, so it is the one
+     place that carries numbers. */
+  .pipeline { display: grid; gap: .5rem; margin: 1.5rem 0 0; padding: 0; list-style: none; counter-reset: step; }
+  .pipeline li {
+    display: grid; grid-template-columns: 2.25rem 1fr; gap: 1rem; align-items: start;
+    padding: .85rem 1rem; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  .pipeline li::before {
+    counter-increment: step; content: counter(step);
+    font-family: "IBM Plex Mono", monospace; font-size: .75rem;
+    color: var(--surface); background: var(--ink-2);
+    width: 1.6rem; height: 1.6rem; border-radius: 50%;
+    display: grid; place-items: center;
+  }
+  .pipeline .who {
+    font-family: "IBM Plex Mono", monospace; font-size: .6875rem;
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .who--llm { color: var(--violet); }
+  .who--code { color: var(--ok); }
+  .pipeline b { display: block; font-weight: 600; }
+  .pipeline span.desc { color: var(--text-muted); font-size: var(--step--1); }
+
+  /* Spec tables — the densest, most useful shape for this material. */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+  th, td { text-align: left; padding: .6rem .85rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  thead th {
+    font-family: "IBM Plex Mono", monospace; font-size: .6875rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint);
+    border-bottom: 1px solid var(--line);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: "IBM Plex Mono", monospace; }
+  .row-hi td { background: color-mix(in srgb, var(--gold) 16%, transparent); }
+
+  .grid2 { display: grid; gap: 1rem; }
+  @media (min-width: 44rem) { .grid2 { grid-template-columns: 1fr 1fr; } }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1.1rem 1.25rem;
+    display: grid; gap: .4rem; align-content: start;
+  }
+  .panel h3 { margin: 0; }
+  .panel p { font-size: var(--step--1); color: var(--text-muted); margin: 0; }
+
+  /* Verdicts use the product's own vocabulary and its own semantics. */
+  .verdicts { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+  .pill {
+    font-family: "IBM Plex Mono", monospace; font-size: .6875rem;
+    letter-spacing: .08em; padding: .3rem .6rem; border-radius: 999px;
+    border: 1px solid currentColor;
+  }
+  .pill--ok { color: var(--ok); }
+  .pill--warn { color: var(--warn); }
+  .pill--stop { color: var(--stop); }
+
+  .note {
+    border-left: 2px solid var(--gold); padding: .25rem 0 .25rem 1.1rem;
+    color: var(--text-muted); font-size: var(--step--1);
+    max-width: var(--measure);
+  }
+  .note strong { color: var(--text); }
+
+  dl.facts { display: grid; gap: 0; margin: 1.25rem 0 0; }
+  dl.facts > div {
+    display: grid; grid-template-columns: 12rem 1fr; gap: 1rem;
+    padding: .55rem 0; border-bottom: 1px solid var(--line-soft);
+  }
+  dl.facts dt {
+    font-family: "IBM Plex Mono", monospace; font-size: .75rem;
+    color: var(--text-faint); letter-spacing: .04em;
+  }
+  dl.facts dd { margin: 0; font-size: var(--step--1); }
+  @media (max-width: 33rem) { dl.facts > div { grid-template-columns: 1fr; gap: .1rem; } }
+
+  ul.plain { margin: .5rem 0 0; padding-left: 1.1rem; max-width: var(--measure); }
+  ul.plain li { margin-bottom: .4rem; }
+  ul.plain li::marker { color: var(--violet); }
+
+  .stat-row { display: flex; flex-wrap: wrap; gap: 2.25rem; margin-top: 1.25rem; }
+  .stat b {
+    display: block; font-family: "IBM Plex Mono", monospace;
+    font-size: var(--step-2); font-variant-numeric: tabular-nums;
+    letter-spacing: -.02em; line-height: 1.1;
+  }
+  .stat span { font-size: .75rem; color: var(--text-faint); letter-spacing: .04em; }
+
+  figure { margin: 1.5rem 0 0; }
+  figcaption { font-size: .75rem; color: var(--text-faint); margin-top: .6rem; font-family: "IBM Plex Mono", monospace; }
+
+  :focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div>
+      <p class="rail__mark">Reference · v1</p>
+      <p class="rail__title">Agentic Commerce Platform</p>
+      <p class="rail__sub">A marketplace where the buyer is an agent — and every rupee it moves needs a human yes.</p>
+    </div>
+    <nav aria-label="Sections">
+      <ol>
+        <li><a href="#thesis">The idea</a></li>
+        <li><a href="#pipeline">How a turn works</a></li>
+        <li><a href="#shopper">Shopping</a></li>
+        <li><a href="#merchant">Selling</a></li>
+        <li><a href="#governance">Money &amp; consent</a></li>
+        <li><a href="#protocols">Agent protocols</a></li>
+        <li><a href="#data">Catalogue &amp; retrieval</a></li>
+        <li><a href="#measured">What was measured</a></li>
+        <li><a href="#stack">Stack &amp; commands</a></li>
+      </ol>
+    </nav>
+    <div class="rail__foot">
+      503 products · 21 merchants<br>
+      4,008 reviews · 33 tables<br>
+      224 tests passing
+    </div>
+  </aside>
+
+  <main>
+    <div class="wrap">
+
+      <header class="lede" id="thesis">
+        <p class="eyebrow">Reference document</p>
+        <h1>A marketplace built for buyers that aren’t people</h1>
+        <p class="standfirst">Merchants publish once and become discoverable and transactible by AI buyers. A shopper describes what they want in plain language; an agent searches every merchant’s machine-readable catalogue, ranks the options against published criteria, explains its choice from the numbers that produced it, and stops dead before it spends anything.</p>
+        <div class="stat-row">
+          <div class="stat"><b>503</b><span>PRODUCTS</span></div>
+          <div class="stat"><b>21</b><span>MERCHANTS</span></div>
+          <div class="stat"><b>4,008</b><span>REVIEWS</span></div>
+          <div class="stat"><b>5</b><span>AGENT PROTOCOLS</span></div>
+          <div class="stat"><b>₹0</b><span>SPENT WITHOUT CONSENT</span></div>
+        </div>
+      </header>
+
+      <section>
+        <div class="section-head">
+          <h2>The one idea everything else follows from</h2>
+        </div>
+        <p><strong>The language model is not the search engine, the ranker, or the executor. It is the interpreter and the narrator.</strong></p>
+        <p>It reads what a shopper meant and writes back what the system decided. Between those two jobs sit ordinary, testable functions: Postgres does retrieval, a weighted scorer does ranking, a policy engine decides whether money may move. The model never chooses the product, never sets the order, and never authorises a payment.</p>
+        <p>That split isn’t caution for its own sake. Because the explanation is generated <em>from</em> the score vector, it cannot invent a reason the ranker didn’t use — and because ranking is a pure function, the same catalogue and the same query give the same answer every time.</p>
+        <div class="note"><strong>A worked consequence.</strong> Early on the model guessed the category “Activewear” for a yoga mat. Categories are a hard filter, so that guess removed every yoga mat and surfaced t-shirts instead. The fix wasn’t a better prompt — it was making category rule-owned. Any field where a wrong value changes what a shopper is <em>allowed to see or buy</em> is now decided in code.</div>
+      </section>
+
+      <section id="pipeline">
+        <div class="section-head">
+          <h2>How one shopping turn works</h2>
+        </div>
+        <p>Two model calls per turn, not twenty. The order is fixed, each stage has one job, and every stage writes to an append-only audit log — so a turn can be replayed rather than guessed at.</p>
+        <ol class="pipeline">
+          <li><div><span class="who who--llm">Model</span><b>Understand</b><span class="desc">Reads the whole conversation. Returns what it understood, what is still unknown, and the next question in its own words. Anything unstated comes back <code>null</code> — never guessed.</span></div></li>
+          <li><div><span class="who who--code">Code</span><b>Retrieve</b><span class="desc">pgvector cosine + Postgres full-text, fused by Reciprocal Rank Fusion (k=60), then hard filters for size, colour, budget, stock, sale window and rated features.</span></div></li>
+          <li><div><span class="who who--code">Code</span><b>Rank</b><span class="desc">Seven weighted criteria. Every one reports <code>weight × normalised = contribution</code>, so the ranking shows its working.</span></div></li>
+          <li><div><span class="who who--llm">Model</span><b>Explain</b><span class="desc">Turns that score vector into three to five plain sentences. It is given the criteria and forbidden from adding a fact that isn’t in them.</span></div></li>
+          <li><div><span class="who who--code">Code</span><b>Authorise</b><span class="desc">Policy engine returns a verdict with the exact bound that produced it. Signed mandate chain verified immediately before money is requested.</span></div></li>
+          <li><div><span class="who who--code">Code</span><b>Pay &amp; confirm</b><span class="desc">Gateway signature verified, mandate chain re-verified, stock committed, order settled. A failed check charges nothing.</span></div></li>
+        </ol>
+      </section>
+
+      <section id="shopper">
+        <div class="section-head">
+          <h2>Shopping</h2>
+        </div>
+
+        <h3>It asks rather than assumes</h3>
+        <p>“I want shoes” matches most of the catalogue, so ranking it would be arbitrary advice. The agent asks — purpose, then size, then colour, then budget — and only then ranks. Rules decide <em>which</em> slot is missing and what the options are; the model only phrases the question. Options come from live stock, so tapping “Black” always leads to black shoes you can buy today, and a skipped answer stays null rather than becoming a silent filter.</p>
+        <p>There is no keyword matching on your replies. <em>“Something for pounding the pavement on weekends, building up to a half marathon”</em> becomes a search for road running shoes because the model understood it.</p>
+
+        <h3>You can see and change what it optimised for</h3>
+        <p>A ranking whose priorities are hidden can’t be argued with, so the weights are shown as an order you can rearrange — click the ▲ ▼ arrows on any row, or drag it, then re-rank. The default now reads:</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Priority</th><th class="num">Weight</th><th>Why it sits there</th></tr></thead>
+            <tbody>
+              <tr><td>Matching your request</td><td class="num">22%</td><td>Not a preference — it’s what keeps results about the thing you asked for, so it isn’t reorderable</td></tr>
+              <tr><td>Rating</td><td class="num">22%</td><td>Bayesian-shrunk, so 5.0 from three reviews can’t beat 4.6 from nine hundred</td></tr>
+              <tr class="row-hi"><td>Seller reliability</td><td class="num">19%</td><td>A great product from a seller who doesn’t ship is worth less than a good one that arrives</td></tr>
+              <tr><td>Price</td><td class="num">18%</td><td>Matters, but no longer outranks whether the order will be honoured</td></tr>
+              <tr><td>Delivery speed</td><td class="num">7%</td><td>Merchant’s standard dispatch window</td></tr>
+              <tr><td>Stock</td><td class="num">6%</td><td>Less chance of a cancellation</td></tr>
+              <tr><td>Return window</td><td class="num">6%</td><td>Longer and easier to send back</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>When the exact thing doesn’t exist, it sells the nearest thing</h3>
+        <p>Two empty results look identical and deserve opposite treatment. If the marketplace doesn’t stock that <em>kind</em> of thing — a gaming laptop — it says so and offers nothing, because offering shoes instead is exactly the hallucination the relevance gate exists to prevent. If it stocks the kind but a filter removed every option — size 15, purple formal shoes — it offers the closest buyable alternatives, each labelled with how it differs: <em>“no size 15 — available in 7, 8, 9, 10, 11.”</em> Those availability claims are queried from live variants, never inferred.</p>
+
+        <h3>The rest of the shopping surface</h3>
+        <div class="grid2">
+          <div class="panel"><h3>Rated features</h3><p>Every product carries 1–5 scores for the qualities its category is measured on — breathability, grip, water resistance, battery life — shown as bars with the number beside them.</p></div>
+          <div class="panel"><h3>One checkout, many merchants</h3><p>Baskets stay per-merchant because fulfilment and signed cart mandates are. You approve once and pay once; each merchant still gets its own order.</p></div>
+          <div class="panel"><h3>Cross-sell that isn’t more of the same</h3><p>Real co-purchase first, then complementary categories. Formal shoes suggest trousers, socks and shirts — not another pair of formal shoes.</p></div>
+          <div class="panel"><h3>Reviews you can read</h3><p>Verified-purchase only, enforced in the schema. Product pages show the rating histogram, because “4.2 from 900” hides whether that’s agreement or a split.</p></div>
+          <div class="panel"><h3>Agent activity</h3><p>An append-only timeline of every step, with the scoring breakdown and every refusal, including the ones you never saw.</p></div>
+          <div class="panel"><h3>Spending limits</h3><p>Per-order and per-day ceilings, plus a saved test payment method that stores no credentials at all.</p></div>
+        </div>
+      </section>
+
+      <section id="merchant">
+        <div class="section-head">
+          <h2>Selling</h2>
+        </div>
+        <p>A merchant publishes once. There is no separate “publish to AI” step to forget — every write re-indexes the product, so the AI-readable catalogue, the ACP feed and the embeddings can’t drift from what was just saved.</p>
+        <dl class="facts">
+          <div><dt>Dashboard</dt><dd>Revenue over 30 days / 12 months / 5 years, best sellers, category mix, sparkline stat tiles, and inventory alerts ranked by urgency rather than alphabetically.</dd></div>
+          <div><dt>Listing wizard</dt><dd>Item → brand → product, with specifications and search tags fetched automatically. Manual fallback at every step, and provenance labelled so a merchant knows what was suggested versus what they typed.</dd></div>
+          <div><dt>Search tags</dt><dd>Their own column at full-text weight <span class="mono">A</span> against description weight <span class="mono">B</span>. Measured: the same term ranks <strong>0.6079 as a tag against 0.2432 in body copy</strong> — 2.5×. Editable and regenerable.</dd></div>
+          <div><dt>Insights agent</dt><dd>Six detectors — stockout, stockout risk, overstock, demand drop, catalogue quality, stale-unavailable — each with evidence, projected impact and a confidence. Policy-gated and queued for approval; it proposes, it never acts.</dd></div>
+          <div><dt>Orders</dt><dd>Mark delivered, cancel with stock returned, or refund through the rails the charge actually arrived on.</dd></div>
+          <div><dt>Reviews</dt><dd>Everything customers wrote, with a “needs attention” filter for three stars and below — a feed that opens on the praise is pleasant and useless.</dd></div>
+          <div><dt>Store settings</dt><dd>Profile, return and shipping policies, and the agent limits that bound what an automated buyer may do with this store.</dd></div>
+        </dl>
+      </section>
+
+      <section id="governance">
+        <div class="section-head">
+          <h2>Money, and the consent in front of it</h2>
+        </div>
+        <p>Every money-moving or catalogue-mutating action passes through one policy engine before it happens. It returns a verdict, a human-readable reason, and the exact bound that produced it — so a refusal is as auditable as a completion.</p>
+        <ul class="verdicts">
+          <li class="pill pill--ok">ALLOW</li>
+          <li class="pill pill--warn">REQUIRE_APPROVAL</li>
+          <li class="pill pill--stop">DENY</li>
+        </ul>
+        <p style="margin-top:1rem">Platform limits are a <em>ceiling</em>, not a default: a per-user or per-merchant rule can only ever be stricter, otherwise raising your own limit would let you escape the platform bound. The shipped default sets <code>requireApprovalAboveMinor: 0</code> — every payment needs an explicit human yes.</p>
+
+        <h3>The mandate chain</h3>
+        <p>Three signed documents, ES256 over canonicalised JSON, each embedding the SHA-256 of its parent: <strong>Intent → Cart → Payment</strong>. Cart mandates are signed by both merchant and shopper. The chain is verified once when built and again immediately before money is requested, so a basket edited in between is caught.</p>
+        <div class="note"><strong>A distinction that matters.</strong> “Under ₹5,000” is a statement about the <em>item</em>, not the total. A ₹4,299 shoe plus 18% GST is ₹5,072 — and refusing that would be obeying the letter of the instruction while breaking its meaning. The mandate carries both figures separately.</div>
+
+        <h3>Payments</h3>
+        <p>Razorpay in test mode behind a gateway interface, with a mock implementation that satisfies the same contract — so the whole purchase flow is runnable with no credentials. The Razorpay adapter refuses to start if the key isn’t a <code>rzp_test_</code> key. Refunds go back through the rails the charge came in on, and the stock decision differs by state: an order that never shipped returns its units, a delivered one does not, and a cancelled one already did.</p>
+        <p>The saved payment method table holds <strong>no credentials</strong> — no card number, CVV or token column exists, and a test asserts that. That is the whole safety argument: there is nothing to leak.</p>
+      </section>
+
+      <section id="protocols">
+        <div class="section-head">
+          <h2>Agent protocols</h2>
+        </div>
+        <p>The point of the platform is that other people’s agents can transact here, so the machine-readable surface is the product, not a side door.</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Protocol</th><th>Surface</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">MCP</td><td class="mono">/api/mcp · stdio</td><td>Six tools over stateless JSON-RPC. No tool can charge — <span class="mono">prepare_purchase</span> returns an authorisation URL for a human.</td></tr>
+              <tr><td class="mono">UCP</td><td class="mono">/.well-known/ucp</td><td>Discovery plus a per-merchant manifest of capabilities, payment handlers and the merchant’s <em>public</em> signing key.</td></tr>
+              <tr><td class="mono">ACP</td><td class="mono">/api/acp/…/feed.json</td><td>The AI-readable product feed, JSON or CSV. This <em>is</em> the catalogue — nothing about it is hand-authored.</td></tr>
+              <tr><td class="mono">AP2</td><td class="mono">signed mandates</td><td>The Intent → Cart → Payment chain described above.</td></tr>
+              <tr><td class="mono">x402</td><td class="mono">/api/x402/…</td><td>HTTP 402 challenge and signed retry against a mock facilitator — no wallet, no funds.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="data">
+        <div class="section-head">
+          <h2>The catalogue, and how it’s retrieved</h2>
+        </div>
+        <p>503 products across 57 categories, generated rather than sampled — and the point is coherence, not volume. Each product is composed from an archetype (what it <em>is</em>) × a material (what it’s <em>made of</em>) × a brand tier (how well it’s made), and its description, its quality scores and its reviews are all written from those same three facts.</p>
+        <p>So a mesh trainer scores breathability 5 and water resistance 1, says exactly that in its description, and collects reviews complaining about wet feet. A dataset whose prose and attributes disagree is worse than no dataset: retrieval learns the false association and nothing downstream can see it.</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Breathability score</th><th class="num">Reviews praising airflow</th><th class="num">Reviews complaining of heat</th></tr></thead>
+            <tbody>
+              <tr><td>1–2 (poor)</td><td class="num">0</td><td class="num">372</td></tr>
+              <tr><td>3 (unremarkable)</td><td class="num">0</td><td class="num">0</td></tr>
+              <tr><td>4–5 (good)</td><td class="num">349</td><td class="num">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption>Opinion, prose and attributes agree because all three come from the same source.</figcaption>
+
+        <h3>Two indexes, deliberately</h3>
+        <p>One vector per product answers <em>which product?</em> Reviews are embedded separately, one chunk each, answering <em>what do we know about it?</em> Folding forty opinions into a product’s own vector would average its spec sheet together with everyone’s experience of it and match neither well.</p>
+
+        <h3>Rated features are a predicate, not a similarity</h3>
+        <p>No embedding represents “at least 4 out of 5”, and a bi-encoder puts <em>waterproof but not breathable</em> almost exactly where it puts <em>waterproof and breathable</em>. So the model extracts the constraint from language — which is what it’s for — and SQL applies it as a pre-filter inside both retrieval legs, which is what that’s for.</p>
+        <div class="note"><strong>Anti-hallucination floor.</strong> A query whose best semantic match falls below <span class="mono">0.34</span> returns nothing at all rather than the nearest unrelated product. The threshold is measured, never chosen, and re-measured whenever the catalogue changes materially — growing it from 184 to 503 products lifted the unstocked ceiling from 0.307 to 0.375, because a marketplace that now sells kitchen appliances genuinely <em>is</em> nearer to “washing machine”.</div>
+      </section>
+
+      <section id="measured">
+        <div class="section-head">
+          <h2>What was actually measured</h2>
+        </div>
+        <p>Retrieval is scored against a labelled eval set whose ground truth is computed from the same quality scores that generated the catalogue — exact rather than hand-judged. Recall@10 and mean reciprocal rank, 78 cases:</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Query kind</th><th class="num">Cases</th><th class="num">Recall@10</th><th class="num">MRR</th><th>Reads as</th></tr></thead>
+            <tbody>
+              <tr><td>Category</td><td class="num">31</td><td class="num">0.894</td><td class="num">0.933</td><td>“formal shoes”</td></tr>
+              <tr><td>Single attribute</td><td class="num">30</td><td class="num">0.833</td><td class="num">0.833</td><td>“waterproof shoes”</td></tr>
+              <tr><td>Trade-off</td><td class="num">4</td><td class="num">0.688</td><td class="num">0.750</td><td>“waterproof but I know it won’t breathe”</td></tr>
+              <tr><td>Negation</td><td class="num">1</td><td class="num">1.000</td><td class="num">1.000</td><td>“definitely not waterproof”</td></tr>
+              <tr><td>Budget</td><td class="num">2</td><td class="num">0.500</td><td class="num">0.583</td><td>“comfortable shoes under 3000”</td></tr>
+              <tr class="row-hi"><td>Paraphrase <em>(held out)</em></td><td class="num">10</td><td class="num">0.280</td><td class="num">0.300</td><td>“my feet get unbearably hot”</td></tr>
+              <tr><td><strong>Overall</strong></td><td class="num">78</td><td class="num"><strong>0.772</strong></td><td class="num"><strong>0.796</strong></td><td>&nbsp;</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:1rem">The highlighted row is the honest one. Those ten cases describe a need <em>without naming the feature</em>, so no predicate can be extracted and retrieval has to work alone. They didn’t move when structured filtering was added — which is correct, and marks the ceiling of a 22-million-parameter embedder. That is where a larger model would earn its keep, and now there’s a number to prove whether it did.</p>
+        <div class="note"><strong>The harness needed fixing before the system did.</strong> An early version capped expected results at 40 rows when 178 products qualified, so retrieval could return ten genuinely breathable shoes and score zero. Correcting the eval — changing no code — moved overall recall from 0.569 to 0.722. A wrong harness is worse than none: it sends you optimising against noise.</div>
+      </section>
+
+      <section id="stack">
+        <div class="section-head">
+          <h2>Stack and commands</h2>
+        </div>
+        <p>Every dependency runs on a free tier without a credit card, and the whole application runs with <em>no API keys at all</em> through deterministic fallbacks — degraded in quality, never in function.</p>
+        <dl class="facts">
+          <div><dt>Application</dt><dd>Next.js 15 App Router, React 19, TypeScript — serving the UI and the agent protocol endpoints from one process</dd></div>
+          <div><dt>Database</dt><dd>Postgres 17 + pgvector via Drizzle ORM · 33 tables</dd></div>
+          <div><dt>Language model</dt><dd>Groq primary, failover to Gemini / OpenRouter / Cerebras. All inference remote</dd></div>
+          <div><dt>Embeddings</dt><dd>all-MiniLM-L6-v2, 384-dim, on-device — 22M parameters, ~4 ms a query</dd></div>
+          <div><dt>Payments</dt><dd>Razorpay test mode behind a gateway interface, with a mock implementation</dd></div>
+          <div><dt>Tests</dt><dd>Vitest, integration against the real database · 224 passing</dd></div>
+        </dl>
+        <div class="tablewrap" style="margin-top:1.5rem">
+          <table>
+            <thead><tr><th>Command</th><th>Does</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">npm run doctor</td><td>Preflight: database, pgvector, seed, index, embeddings, model, gateway</td></tr>
+              <tr><td class="mono">npm run db:seed-catalog</td><td>Generate the 503-product catalogue (idempotent)</td></tr>
+              <tr><td class="mono">npm run db:seed-reviews</td><td>Reviews and the purchase history the schema requires for them</td></tr>
+              <tr><td class="mono">npm run catalog:index</td><td>Rebuild product embeddings and review chunks</td></tr>
+              <tr><td class="mono">npm run eval:retrieval</td><td>Score retrieval against the labelled eval set</td></tr>
+              <tr><td class="mono">npm run eval:relevance-gate</td><td>Re-measure the anti-hallucination threshold</td></tr>
+              <tr><td class="mono">npm run mcp:stdio</td><td>Serve the MCP tools to a desktop agent client</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:1.5rem;color:var(--text-faint);font-size:var(--step--1)">Demo logins use <span class="mono">demo@shopper.test</span> and <span class="mono">care@stride.test</span>. Razorpay test card <span class="mono">4100 2800 0000 1007</span> — the international <span class="mono">4111…</span> number declines.</p>
+      </section>
+
+    </div>
+  </main>
+</div>
+</body>
+</html>
