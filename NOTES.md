@@ -70,8 +70,8 @@ src/
   app/
     (auth)/login, register           auth pages, elevated form cards
     (app)/                           authenticated shell (dark sidebar + light content)
-      shop, browse, product/[id], cart, checkout, orders, reviews,
-      preferences, support, activity, settings/limits
+      shop, browse, for-you, product/[id], cart, checkout, orders,
+      reviews, preferences, support, activity, settings/limits
       merchant/  (overview, products, products/[id], products/new, orders,
                   promotions, insights, support, protocols, settings)
     api/
@@ -97,7 +97,8 @@ src/
                             vocabulary.ts, featured.ts, actions.ts,
                             image-actions.ts, attributes.ts, facets.ts,
                             create-product.ts (THE single writer)
-    shopper/                knowledge.ts (the taste profile), signals.ts
+    shopper/                knowledge.ts (the taste profile), for-you.ts,
+                            signals.ts, actions.ts
     commerce/               cart.ts, checkout.ts, gateway.ts, webhooks.ts,
                             expiry.ts, cart-actions.ts, refund.ts, test-utils.ts
     policy/engine.ts        the single gate for every consequential action
@@ -274,6 +275,26 @@ variants**, not read off `candidate.variant` — that is one variant, so a list 
 true of no individual product. Stock is never relaxed: an unbuyable alternative is not an
 alternative.
 
+**Closeness is weighted by KIND of difference, never counted.** Counting was actively backwards: a
+navy rucksack offered against "navy running shoes" matches on colour and therefore has one FEWER
+difference than the same running shoe in black, so counting ranked the rucksack first. A different
+category costs 100, brand 8, price 6, size 4, colour/style/width 1 — so the right kind of product
+wins however many small things it gets wrong, and no amount of soft-attribute matching buys a wrong
+category back.
+
+Two supporting rules:
+- **A dropped constraint must stop steering RETRIEVAL, not just stop filtering.** Clearing
+  `attributes` removes the hard filter while "navy" sits in the semantic phrase, so the embedding
+  goes and finds navy things of any kind. The word is stripped from the query text too — the same
+  failure as a focus answer leaking into the query and turning a search for shoes into shorts.
+- **The anchor comes from `attribute_mismatch` rejections only, thresholded by share.** Those
+  products matched everything except the colour, so they are the right kind of thing by
+  construction. The whole rejected set will not do: "magenta backpack" recalls 60 products across
+  seven categories including Hoodies, because recall is meant to be generous, and anchoring on all
+  of it waves a hoodie through. Categories below 15% of the attribute rejections are recall noise.
+  A stated `query.category` is definitive and wins outright; no anchor at all means category costs
+  nothing rather than being guessed.
+
 ### Suggestion chips (`server/catalog/facets.ts`)
 Chips are a promise — tapping "Black" must lead to black shoes buyable today. `computeFacets()`
 counts live variants joined to live inventory, scoped to the products the search recalled (so
@@ -394,6 +415,23 @@ never stated and cannot see.
 IP, referrer or user agent. Views dedupe over 30 minutes, and `deleteShopperSignals` empties it.
 Orders and reviews are NOT erasable there: they are records of real transactions, not preferences we
 inferred.
+
+### Suggestions from the profile (`server/shopper/for-you.ts` + `/for-you`)
+The failure this is designed against is a "for you" page that is a **mirror** — a shopper who bought
+running shoes shown nothing but running shoes, from the brand they already own. Three rules:
+
+- **Nothing they already own.** `NOT EXISTS` against their own paid and fulfilled orders. The
+  largest source of embarrassing suggestions and the cheapest to remove.
+- **Every shelf states which part of the profile built it, and every CARD carries its own reason**
+  from `affinityFor`. A shelf can only say what it is broadly about; the card says why this one.
+- **One shelf deliberately leaves their categories.** Qualities are the portable part of a profile —
+  "likes breathable, packable things" is as true of a jacket as a shoe — so the discovery shelf ranks
+  on qualities alone and EXCLUDES what they usually buy. Without it the page is a mirror however well
+  the rest is built, because their usual categories score highest on every other axis.
+
+Ranking uses the same `affinityFor` the agent's ranker uses. Two places scoring "fits you"
+differently is how a recommendation comes to contradict the ranking that follows it. A cold shopper
+gets an honest empty state, never bestsellers relabelled as "picked for you".
 
 ### Recommendations (`server/catalog/recommendations.ts`)
 Two different questions, two sources. **`alsoBought`** is real co-purchase from `order_items` — what
@@ -535,6 +573,21 @@ never silently dropped from a combined total.
     because a marketplace that sells kitchen appliances IS nearer to "washing machine". Re-measure
     after any material catalogue change; never raise it to block a query, because that starts
     refusing products you actually sell ("noise cancelling headphones" sits at 0.373).
+28. **The image service admits roughly ONE anonymous request in flight.** Measured: 3 concurrent
+    returned two 429s, 6 returned five. There is no throughput to win by parallelising — raising
+    concurrency earns rate-limit errors, not images. What makes a long run finish is **retrying**,
+    because a 429 means "in a moment" and the old code treated it exactly like a permanent failure:
+    a batch of forty produced three images and thirty-seven phantom failures, which is why this
+    looked for weeks like a broken image pipeline rather than a missing retry. Retryable is
+    429/408/5xx/timeout; a 400 will fail identically forever and must not burn the budget. At ~40s
+    an image the full catalogue is a many-hour job, so pairs are photographed **most-sold first** and
+    every run is resumable (`image_url IS NULL`).
+29. **Never run `npm run build` while `npm run dev` is running** — they share `.next`, and the build
+    reads chunks the dev server is rewriting. It fails with a DIFFERENT error each time
+    (`Failed to collect page data`, `TypeError: a[d] is not a function` in webpack-runtime) on
+    whichever route lost the race, which reads as a real bug in that route. Kill dev, `rm -rf .next`,
+    then build.
+
 26. **A client component importing a value from a module that imports `db` breaks the build.**
     `browse-filters.tsx` ("use client") imported `BROWSE_SORTS` from `server/catalog/browse.ts`,
     which dragged the `postgres` driver into the browser bundle:
@@ -587,6 +640,7 @@ in function. Preserve that property.
 | `npm run db:seed-extra` | additive, idempotent, preserves real users |
 | `npm run catalog:index [-- --force]` | rebuild AI catalog + embeddings |
 | `npm run catalog:images` | generate missing product images |
+| `npm run catalog:variant-images [-- --limit N --gender men]` | per-colour images, most-sold first, resumable |
 | `npm run mcp:stdio` | MCP server for an MCP desktop client |
 | `npm test` | full suite (integration, needs the DB seeded) |
 

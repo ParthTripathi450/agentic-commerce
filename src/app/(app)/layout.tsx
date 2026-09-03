@@ -12,6 +12,7 @@ import { signOutAction } from "@/server/auth/actions";
 const customerNav = (cartCount: number): NavItem[] => [
   { href: "/shop", label: "Shop with AI", icon: "shop" },
   { href: "/browse", label: "Browse products", icon: "store" },
+  { href: "/for-you", label: "For you", icon: "insights" },
   { href: "/cart", label: "Your cart", icon: "cart", badge: cartCount || undefined },
   { href: "/orders", label: "Your orders", icon: "orders" },
   { href: "/reviews", label: "Your reviews", icon: "reviews" },

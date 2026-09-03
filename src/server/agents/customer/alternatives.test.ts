@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { hybridSearch } from "@/server/catalog/search";
 import type { Candidate } from "@/server/catalog/search";
-import { describeDifferences, findAlternatives, rankByCloseness } from "./alternatives";
+import {
+  describeDifferences,
+  differenceDistance,
+  findAlternatives,
+  rankByCloseness,
+} from "./alternatives";
 import { intentToQuery } from "./intent";
 import { shoppingIntentSchema, type ShoppingIntent } from "./intent-schema";
 
@@ -90,15 +95,35 @@ describe("describeDifferences", () => {
 
 describe("rankByCloseness", () => {
   it("puts the least-compromised substitute first", () => {
-    const far = { candidate: candidate(), differences: ["a", "b", "c"] };
-    const near = { candidate: candidate(), differences: ["a"] };
+    const far = { candidate: candidate(), differences: ["a", "b", "c"], distance: 12 };
+    const near = { candidate: candidate(), differences: ["a"], distance: 1 };
     expect(rankByCloseness([far, near])[0]).toBe(near);
   });
 
   it("breaks ties on retrieval relevance", () => {
-    const weak = { candidate: candidate({ retrieval: { vectorScore: 0, lexicalScore: 0, rrf: 0.01 } }), differences: ["a"] };
-    const strong = { candidate: candidate({ retrieval: { vectorScore: 0, lexicalScore: 0, rrf: 0.05 } }), differences: ["a"] };
+    const weak = { candidate: candidate({ retrieval: { vectorScore: 0, lexicalScore: 0, rrf: 0.01 } }), differences: ["a"], distance: 1 };
+    const strong = { candidate: candidate({ retrieval: { vectorScore: 0, lexicalScore: 0, rrf: 0.05 } }), differences: ["a"], distance: 1 };
     expect(rankByCloseness([weak, strong])[0]).toBe(strong);
+  });
+
+  it("prefers the right product in the wrong colour over the wrong product in the right colour", () => {
+    // The complaint this ordering exists to answer. Counting differences got
+    // it backwards: a navy rucksack offered against "navy running shoes"
+    // matches on colour and so has FEWER differences than the same running
+    // shoe in black, and used to be ranked first.
+    const rightThingWrongColour = {
+      candidate: candidate({ category: "Running Shoes" }),
+      differences: ["no colour navy — available in black, white"],
+      distance: 1,
+    };
+    const wrongThingRightColour = {
+      candidate: candidate({ category: "Backpacks" }),
+      differences: ["a backpack, not what you were looking at"],
+      distance: 100,
+    };
+
+    const ranked = rankByCloseness([wrongThingRightColour, rightThingWrongColour]);
+    expect(ranked[0]).toBe(rightThingWrongColour);
   });
 });
 
@@ -141,5 +166,55 @@ describe("findAlternatives — the guard", () => {
       // ...and never unsellable.
       expect(a.candidate.variant.availableQuantity).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("differenceDistance — colour must never outrank product kind", () => {
+  /** "navy running shoes" — the exact request the complaint was about. */
+  const wantsNavy = (over: Partial<ShoppingIntent> = {}) =>
+    intent({ attributes: { color: "navy" }, ...over });
+
+  it("costs a different category far more than a different colour", () => {
+    const sameKind = candidate({ category: "Running Shoes" });
+    sameKind.variant.attributes = { color: "black", size: "9" };
+
+    const otherKind = candidate({ category: "Backpacks" });
+    otherKind.variant.attributes = { color: "navy", size: "one" };
+
+    const anchors = ["Running Shoes"];
+    expect(differenceDistance(wantsNavy(), sameKind, anchors)).toBeLessThan(
+      differenceDistance(wantsNavy(), otherKind, anchors),
+    );
+  });
+
+  it("cannot be bought back by matching every soft attribute", () => {
+    // Even a wrong-category product that matches colour, style AND width must
+    // stay behind a right-category product that matches none of them.
+    const wrongKind = candidate({ category: "Backpacks" });
+    wrongKind.variant.attributes = { color: "navy", style: "casual", width: "regular" };
+
+    const rightKind = candidate({ category: "Running Shoes" });
+    rightKind.variant.attributes = { color: "red", style: "sport", width: "wide" };
+
+    const asked = wantsNavy({ attributes: { color: "navy", style: "casual", width: "regular" } });
+    const anchors = ["Running Shoes"];
+
+    expect(differenceDistance(asked, rightKind, anchors)).toBeLessThan(
+      differenceDistance(asked, wrongKind, anchors),
+    );
+  });
+
+  it("says the category mismatch out loud rather than hiding it", () => {
+    const otherKind = candidate({ category: "Backpacks" });
+    otherKind.variant.attributes = { color: "navy" };
+
+    const lines = describeDifferences(wantsNavy(), otherKind, {}, ["Running Shoes"]);
+    expect(lines.join(" ")).toContain("backpacks");
+  });
+
+  it("charges nothing for category when there is no anchor to compare against", () => {
+    const any = candidate({ category: "Backpacks" });
+    any.variant.attributes = { color: "navy" };
+    expect(differenceDistance(wantsNavy(), any, [])).toBe(0);
   });
 });

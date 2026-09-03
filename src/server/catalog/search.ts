@@ -103,6 +103,15 @@ export type Candidate = {
 export type Rejected = {
   productId: string;
   title: string;
+  /**
+   * What sort of product this was.
+   *
+   * Carried so a caller can tell WHAT was filtered out, not just that
+   * something was. A product rejected for its colour is still the kind of
+   * thing the shopper was shopping for, and `findAlternatives` uses exactly
+   * that to keep a substitute in the right category.
+   */
+  category: string;
   merchantSlug: string;
   merchantName: string;
   reason: RejectionReason;
@@ -401,6 +410,7 @@ export async function hybridSearch(query: StructuredQuery): Promise<SearchResult
       rejected.push({
         productId,
         title: head.title,
+        category: head.category,
         merchantSlug: head.merchant_slug,
         merchantName: head.merchant_name,
         reason,
@@ -564,6 +574,7 @@ export async function hybridSearch(query: StructuredQuery): Promise<SearchResult
       rejected: candidates.map((candidate) => ({
         productId: candidate.productId,
         title: candidate.title,
+        category: candidate.category,
         merchantSlug: candidate.merchant.slug,
         merchantName: candidate.merchant.name,
         reason: "not_relevant" as const,
@@ -590,6 +601,7 @@ export async function hybridSearch(query: StructuredQuery): Promise<SearchResult
       rejected.push({
         productId: candidate.productId,
         title: candidate.title,
+        category: candidate.category,
         merchantSlug: candidate.merchant.slug,
         merchantName: candidate.merchant.name,
         reason: "not_relevant",
