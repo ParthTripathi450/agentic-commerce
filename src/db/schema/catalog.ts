@@ -155,6 +155,55 @@ export const catalogDocuments = pgTable(
   ],
 );
 
+export const evidenceKind = pgEnum("evidence_kind", ["review", "spec", "policy"]);
+
+/**
+ * Retrievable evidence, embedded separately from the product itself.
+ *
+ * `catalog_documents` answers "which product?" — one row, one embedding, per
+ * product. This table answers "what do we KNOW about it?", one row per piece of
+ * evidence, and that separation is the point: folding forty reviews into a
+ * product's `ai_text` would average its spec sheet together with everyone's
+ * opinions, and the vector would then match neither well.
+ *
+ * Keeping them apart means "do these run hot in summer?" can retrieve the one
+ * review sentence that answers it, and cite it — which is the difference
+ * between grounded RAG and keyword search with extra steps.
+ *
+ * `kind` is present from the start so specs and return policies can be chunked
+ * later without a second migration; only `review` is populated today.
+ */
+export const evidenceChunks = pgTable(
+  "evidence_chunks",
+  {
+    id: pk(),
+    productId: varchar("product_id", { length: 36 })
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    merchantId: varchar("merchant_id", { length: 36 })
+      .notNull()
+      .references(() => merchants.id, { onDelete: "cascade" }),
+    kind: evidenceKind("kind").notNull().default("review"),
+    /** The row this chunk was derived from, for citation back to the source. */
+    sourceId: varchar("source_id", { length: 36 }),
+    body: text("body").notNull(),
+    /** Carried so retrieval can prefer or balance sentiment without a join. */
+    ratingBp: integer("rating_bp"),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }),
+    searchVector: tsvector("search_vector").generatedAlwaysAs(
+      sql`to_tsvector('english', coalesce(body, ''))`,
+    ),
+    sourceHash: varchar("source_hash", { length: 64 }).notNull(),
+    embeddedAt: timestamp("embedded_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("evidence_product_idx").on(t.productId),
+    index("evidence_search_idx").using("gin", t.searchVector),
+    index("evidence_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
+);
+
 export const productsRelations = relations(products, ({ one, many }) => ({
   merchant: one(merchants, { fields: [products.merchantId], references: [merchants.id] }),
   variants: many(productVariants),

@@ -21,7 +21,13 @@
     "catalog:images": "tsx --env-file=.env.local src/scripts/generate-images.ts",
     "db:seed-extra": "tsx --env-file=.env.local src/db/seed-extra.ts",
     "db:seed-shoes": "tsx --env-file=.env.local src/db/seed-shoes.ts",
-    "db:seed-clothes": "tsx --env-file=.env.local src/db/seed-clothes.ts"
+    "db:seed-clothes": "tsx --env-file=.env.local src/db/seed-clothes.ts",
+    "db:seed-catalog": "tsx --env-file=.env.local src/db/seed-catalog.ts",
+    "db:backfill-qualities": "tsx --env-file=.env.local src/db/backfill-qualities.ts",
+    "db:seed-reviews": "tsx --env-file=.env.local src/db/seed-reviews.ts",
+    "eval:generate": "tsx --env-file=.env.local src/db/generate-eval-set.ts",
+    "eval:retrieval": "tsx --env-file=.env.local src/scripts/eval-retrieval.ts",
+    "eval:relevance-gate": "tsx --env-file=.env.local src/scripts/measure-relevance-gate.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",

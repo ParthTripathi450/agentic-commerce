@@ -264,6 +264,37 @@ actually buy. Two deterministic guards sit over the model: a repeated question i
 redirected, and a chip row is never rendered empty (`optionsForSlot` fills gaps for purpose/gender,
 which are needs rather than countable attributes).
 
+### The synthetic dataset (`db/catalog-blueprints.ts`, `catalog-generator.ts`)
+503 products, 4,008 reviews, 57 categories, 21 merchants. Generated, not sampled — and the point is
+**coherence, not volume**. Every product is composed from an archetype (what it IS) × a material
+(what it is MADE OF) × a brand tier (how well it is made), and its description, its 1–5
+`qualities` scores and its reviews are all written from those same three facts. A mesh trainer
+therefore scores breathability 5 / water resistance 1, says so in its description, and collects
+reviews complaining about wet feet — prose, attributes and opinion cannot contradict each other.
+A dataset where they do is worse than none: retrieval learns the false association and nothing
+downstream can see it.
+
+Brands are invented. Attaching fabricated durability scores to real manufacturers would make the
+data misleading the moment it is screenshotted.
+
+**Reviews are authored by a dedicated pool on `@marketplace.reviews`**, never by test accounts:
+`provisionTestShopper()` deletes all its user's orders and reviews cascade from orders, so
+attributing the corpus to a test shopper means `npm test` silently destroys it. It already did once
+— 861 reviews vanished on the first suite run, leaving orphaned embeddings.
+
+### RAG retrieval (`evidence_chunks`, `server/catalog/evidence-indexer.ts`)
+Reviews are embedded as their **own** chunks rather than folded into the product document.
+`catalog_documents` answers "which product?" with one vector each; averaging forty opinions into
+that would blur the product's identity and match neither specs nor reviews well. Separate chunks
+let "do these run hot in summer?" retrieve the sentence that answers it and cite its source.
+
+**The eval set is the point** (`npm run eval:generate`, `npm run eval:retrieval`). Ground truth is
+computed from the same quality scores that generated the catalogue, so it is exact rather than
+hand-judged. Current baseline at k=10: **overall recall 0.722, MRR 0.776** — category 0.890,
+attribute 0.629, trade-off 0.338, negation 0.300. Expected sets must be COMPLETE, never sampled: an
+early version capped them at 40 rows and measured the wrong thing entirely, since 178 products
+qualify as breathable and retrieval could return ten genuinely breathable shoes and score zero.
+
 ### Recommendations (`server/catalog/recommendations.ts`)
 Two different questions, two sources. **`alsoBought`** is real co-purchase from `order_items` — what
 shoppers actually put in the same order, so it surfaces genuine complements (a t-shirt with running
@@ -389,6 +420,26 @@ never silently dropped from a combined total.
     shoes* — and would have done the same for badminton, squash and golf. `hasStatedPurpose()`
     instead strips filler and the product noun and asks whether ANYTHING is left. Prefer a rule
     about the shape of the sentence over a list of the words you thought of.
+22. **An eval set with SAMPLED ground truth measures nothing.** Capping expected results at 40 rows
+    made retrieval look broken: 178 products qualify as breathable, so returning ten genuinely
+    breathable shoes scored zero when none fell in the arbitrary 40. Overall recall read 0.569; with
+    complete ground truth the same index scored 0.722. A wrong harness is worse than none — it
+    sends you optimising against noise.
+23. **Shared phrasing across documents compresses the embedding space.** Rendering quality scores
+    into every product's text doubled attribute recall (0.295 -> 0.629) but made two UNRELATED
+    documents 27% more similar (0.186 -> 0.237), which narrowed the relevance gate's margin. Both
+    effects are real; the trade was taken deliberately. Watch for it whenever boilerplate is added
+    to every document.
+24. **`MIN_TOP_RELEVANCE` is measured, never chosen.** `npm run eval:relevance-gate` re-measures the
+    two bands. Growing the catalogue 184 -> 503 lifted the unstocked ceiling from 0.307 to 0.375,
+    because a marketplace that sells kitchen appliances IS nearer to "washing machine". Re-measure
+    after any material catalogue change; never raise it to block a query, because that starts
+    refusing products you actually sell ("noise cancelling headphones" sits at 0.373).
+25. **Tests that name a specific product are brittle at scale.** Two search tests pinned
+    "Velocity Run 3" in the top 10 of a generic query. That held at 184 products; at 503 the ten
+    returned depend on stock levels other suites legitimately mutate, so they passed alone and
+    failed in the suite. Assert the PROPERTY (results are relevant; a named product is retrievable
+    when named) rather than a specific winner.
 
 
 

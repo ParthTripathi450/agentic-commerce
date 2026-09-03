@@ -21,6 +21,24 @@ async function main() {
     `\ndone in ${(result.durationMs / 1000).toFixed(1)}s — ` +
       `${result.indexed} indexed, ${result.skipped} unchanged, ${pruned} pruned, ${result.total} total`,
   );
+
+  // Review chunks are embedded separately so a product's own vector stays about
+  // the product; see server/catalog/evidence-indexer.ts.
+  const { indexEvidence } = await import("@/server/catalog/evidence-indexer");
+  console.log("\nindexing review evidence…");
+  const evidence = await indexEvidence({
+    force,
+    onProgress: (done, total) => {
+      if (done % 128 === 0 || done === total) {
+        process.stdout.write(`\r  embedded ${done}/${total}`);
+      }
+    },
+  });
+  console.log(
+    `\ndone in ${(evidence.durationMs / 1000).toFixed(1)}s — ` +
+      `${evidence.indexed} chunks indexed, ${evidence.skipped} unchanged, ${evidence.total} total`,
+  );
+
   process.exit(0);
 }
 

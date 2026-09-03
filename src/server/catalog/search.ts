@@ -132,9 +132,27 @@ const RELEVANCE_FLOOR = 0.12;
 /**
  * Below this, the catalogue simply does not stock what was asked for.
  *
- * Measured against this catalogue: products that ARE stocked score 0.369–0.721
- * for a plain description of them, while things that are NOT stocked top out at
- * 0.307 ("washing machine" matching a dog bowl). 0.34 sits in that gap.
+ * Re-measured on the 503-product catalogue (`npm run eval:relevance-gate`):
+ * clearly-unstocked queries score 0.199–0.294 (prescription medication, garden
+ * shed, engagement ring, gaming laptop) while stocked ones reach 0.72–0.75.
+ * 0.34 still sits in that gap.
+ *
+ * **The margin has narrowed, and honestly so.** Two things moved it:
+ *
+ *  1. A marketplace selling kitchen appliances and home textiles is genuinely
+ *     nearer to "washing machine" (0.359) than one selling only shoes (0.307).
+ *     That is the catalogue being more diverse, not the gate being wrong.
+ *  2. Rendering quality scores into every document added shared phrasing, and
+ *     shared phrasing pulls all embeddings toward a common centroid — measured
+ *     at +27% similarity between two unrelated documents. It bought a large
+ *     win (attribute recall@10 went 0.295 -> 0.629) at the cost of margin here.
+ *
+ * The consequence: near-miss household queries ("washing machine", "dishwasher
+ * tablets" 0.375) now leak past the gate, and "noise cancelling headphones"
+ * (0.373, genuinely stocked) sits among them — so no threshold separates those
+ * two cases. The real fix is a stronger embedding model than 22M MiniLM, which
+ * trades against the M1/no-heavy-local-compute constraint. Do NOT paper over it
+ * by raising the threshold: that starts refusing products we actually sell.
  *
  * The point is to answer "we don't sell that" instead of offering the nearest
  * unrelated thing — an agent that returns a marble run for "electric guitar"

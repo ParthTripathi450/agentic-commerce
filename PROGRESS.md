@@ -8,8 +8,8 @@ Read `NOTES.md` first for architecture and conventions. This file is the state s
 **Git:** pushed to `origin/main`
 **Repo:** https://github.com/ParthTripathi450/agentic-commerce-platform (private)
 
-**Local data:** 21 merchants · 184 active products · ~1,560 variants · 50 categories ·
-24 users · 184/184 indexed · 86 footwear + 42 apparel products
+**Local data:** 21 merchants · **503 products** · 5,502 variants · 57 categories ·
+**4,008 reviews** · 4,008 embedded review chunks · 503/503 indexed · ~83 MB database
 
 ---
 
@@ -168,6 +168,35 @@ cap was hit during testing. `GROQ_FAST_MODEL=openai/gpt-oss-20b` now serves conv
 fewer tokens and a separate daily pool. Groq's catalogue had rotated again (§8.6) — no
 `llama-3.1-8b-instant`; `gpt-oss-20b` and `qwen3.x-27b` are what is available.
 **Groq is the only configured provider — a `GEMINI_API_KEY` would give real failover.**
+
+### The RAG dataset (this session)
+**503 products, 4,008 reviews, 57 categories** — generated for coherence, not volume.
+Archetype × material × brand tier produces the description, the 1–5 `qualities` scores AND the
+reviews from the same three facts, so they cannot contradict each other. Verified: products scoring
+breathability 1–2 got **0** reviews praising airflow and 372 complaining of heat; those scoring 4–5
+got 349 praises and **0** complaints. Star ratings track quality quartiles monotonically
+(3.19 → 3.89 → 4.42 → 4.71).
+
+**Reviews are embedded as their own `evidence_chunks`**, not folded into product documents —
+otherwise a product's vector becomes an average of its spec sheet and forty opinions.
+
+**A labelled eval set** (`npm run eval:generate` / `eval:retrieval`) with ground truth computed from
+the same scores that generated the catalogue. Baseline at k=10: **recall 0.722, MRR 0.776**
+(category 0.890, attribute 0.629, trade-off 0.338, negation 0.300).
+
+Four real problems it surfaced, none of which were visible without it:
+1. **Quality scores were embedded as `[object Object]`** — the whole point of the dataset was
+   invisible to retrieval. Rendering them as prose took attribute recall 0.295 → 0.629.
+2. **My eval set was measuring the wrong thing**, capping ground truth at 40 rows when 178 products
+   qualified. Fixing it moved overall recall 0.569 → 0.722 with no code change.
+3. **`npm test` was destroying the corpus** — 861 reviews vanished because `provisionTestShopper()`
+   deletes its user's orders and reviews cascade. Reviews now come from a dedicated pool.
+4. **The relevance gate's margin narrowed**, partly from catalogue diversity and partly from the
+   quality prose making all documents 27% more similar. Re-measured with
+   `npm run eval:relevance-gate`; kept at 0.34 and documented rather than papered over.
+
+Also fixed two tests that pinned a *specific product* in a generic query's top 10 — fine at 184
+products, order-dependent at 503.
 
 ### Ranking priorities, and four fixes from testing
 - **"tennis sports shoes" was still asked "what will you use them for?"** The degraded fallback

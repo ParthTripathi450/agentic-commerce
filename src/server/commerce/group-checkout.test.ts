@@ -65,7 +65,10 @@ describe("group checkout across two merchants", () => {
       JOIN products p ON p.id = v.product_id
       JOIN inventory i ON i.variant_id = v.id
       WHERE v.active AND p.status = 'active' AND i.quantity > 5
-      ORDER BY p.merchant_id, v.id
+      -- Cheapest per merchant: test shoppers carry a Rs 40,000 order ceiling,
+      -- and the catalogue now contains premium items that two of can exceed it
+      -- before the test has set the ceiling it actually wants to prove.
+      ORDER BY p.merchant_id, v.price_minor ASC
       LIMIT 2
     `);
     const rows = picks as unknown as { variant_id: string; merchant_id: string }[];
@@ -190,7 +193,7 @@ describe("combined spending limits", () => {
       JOIN products p ON p.id = v.product_id
       JOIN inventory i ON i.variant_id = v.id
       WHERE v.active AND p.status = 'active' AND i.quantity > 5
-      ORDER BY p.merchant_id, v.id
+      ORDER BY p.merchant_id, v.price_minor ASC
       LIMIT 2
     `)) as unknown as { variant_id: string }[];
     expect(picks.length).toBe(2);
