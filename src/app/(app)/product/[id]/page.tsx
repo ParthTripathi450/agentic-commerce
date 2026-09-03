@@ -5,6 +5,8 @@ import { ProductDetailView } from "@/components/shop/product-detail";
 import { AlsoLike } from "@/components/shop/also-like";
 import { requireCustomer } from "@/lib/session";
 import { getProductDetail } from "@/server/catalog/product-page";
+import { evidenceByTopic } from "@/server/catalog/evidence";
+import { EvidencePanel } from "@/components/shop/evidence-panel";
 import { recordProductView } from "@/server/shopper/signals";
 import { getProductReviewsDetailed } from "@/server/reviews/queries";
 import { RatingSummary, ReviewList } from "@/components/reviews/review-list";
@@ -37,6 +39,14 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
   const { reviews, breakdown } = await getProductReviewsDetailed(product.productId, 20);
 
+  // The qualities this category is rated on become the questions asked of the
+  // review corpus, so the page shows the evidence for each number rather than
+  // only the number.
+  const qualities = Object.keys(
+    (product.attributes as { qualities?: Record<string, number> })?.qualities ?? {},
+  );
+  const evidence = await evidenceByTopic(product.productId, qualities);
+
   return (
     <div className="max-w-4xl space-y-6">
       <PageHeader
@@ -45,6 +55,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         actions={<BackLink label="Back to results" />}
       />
       <ProductDetailView product={product} />
+      <EvidencePanel topics={evidence} />
       <Card>
         <CardBody className="space-y-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">

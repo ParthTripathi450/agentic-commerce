@@ -93,7 +93,7 @@ src/
                             autonomous.ts, dto.ts
     agents/merchant/        agent.ts (insights), detectors.ts,
                             product-assistant.ts, listing-actions.ts
-    catalog/                search.ts, browse.ts, indexer.ts, normalize.ts,
+    catalog/                search.ts, browse.ts, evidence.ts, indexer.ts, normalize.ts,
                             vocabulary.ts, featured.ts, actions.ts,
                             image-actions.ts, attributes.ts, facets.ts,
                             create-product.ts (THE single writer)
@@ -346,6 +346,32 @@ it is for). Two decisions that were measured, not guessed:
   pinned trade-off at 0.438. If the constraint is too tight, the relaxation path drops it and says
   so — the honest way to widen.
 
+**The retrieval layer is `server/catalog/evidence.ts`, and it is wired into three places:** the
+product page (`evidenceByTopic` — the qualities a category is rated on become the questions asked of
+the corpus, so each score is shown WITH the sentence that evidences it), the product chat
+(`refine.ts` answers "will my feet get hot?" by quoting a buyer instead of reciting `breathability:
+4`), and any caller needing `productsByEvidence`. `MIN_EVIDENCE_SCORE = 0.34` mirrors the catalogue
+relevance gate for the same reason — a model handed the nearest three sentences will summarise them
+however irrelevant, so "nothing close enough" must be a returnable result. **Nothing here generates
+text**: sentences are returned verbatim with their reviewer's rating, so every claim traces to a
+person who wrote it.
+
+`evidenceByTopic` assigns each chunk to its ONE best topic rather than each topic to its best chunk.
+Within a product every review is written in the same register about the same object, so they score
+similarly against every question, and the per-topic argmax put the same sentence under comfort,
+support, durability and breathability at once.
+
+**Evidence is NOT a search recall leg, and that was measured rather than assumed.** Adding it as a
+third RRF leg moved overall recall 0.772 -> 0.769 and paraphrase 0.280 -> **0.260**; restricting it
+to praise-only reviews made paraphrase worse again at 0.250. Both were reverted. The cause is worth
+keeping: **embeddings have no notion of polarity or desire.** "My feet get unbearably hot" retrieves
+"the warmth is the selling point — warmer than its weight suggests" as its best match, on a product
+scoring `breathability: 1`, because *hot* and *warmth* are semantic neighbours while being opposite
+in intent. Review prose is dense in exactly that vocabulary, so the evidence leg amplified the
+confusion. The thing that fixes paraphrase is extracting the DESIRED quality from the stated need
+("hot feet" -> `breathability >= 4`), which is the model's job via `qualityConstraints` — not more
+retrieval.
+
 **The eval set is the point** (`npm run eval:generate`, `npm run eval:retrieval`). Ground truth is
 computed from the same quality scores that generated the catalogue, so it is exact rather than
 hand-judged. Baseline at k=10: **overall recall 0.772, MRR 0.796** — category 0.894, attribute
@@ -573,6 +599,28 @@ never silently dropped from a combined total.
     because a marketplace that sells kitchen appliances IS nearer to "washing machine". Re-measure
     after any material catalogue change; never raise it to block a query, because that starts
     refusing products you actually sell ("noise cancelling headphones" sits at 0.373).
+30. **Boilerplate in a chunk is what the embedding learns.** Evidence chunks were built as
+    `"Review of <product> (<category>) — <n> out of 5. <title> <body>"`. On a two-line review that
+    prefix is half the tokens, so the vector encoded the template every chunk shares instead of the
+    sentence that distinguishes it — §8.23 with the volume turned up. It failed exactly as you would
+    predict: "my feet get unbearably hot on long runs" retrieved THERMAL RUNNING TIGHTS at 0.643.
+    The chunk is now the opinion and nothing else; `productId`, `merchantId` and `ratingBp` are
+    COLUMNS and can be filtered, joined and displayed without being embedded, which is the reason
+    the evidence lives in its own table at all.
+31. **A generated corpus can contradict itself, and 41% of this one did.** `titleFor` took its
+    sentiment from the reviewer's OVERALL stars while the body took its from each quality's own
+    score. Those disagree precisely when a product is good at one thing and bad overall — a shoe
+    scoring breathability 4 and durability 1 rates ~2.5 stars, and was titled "Breathability is the
+    weak spot" above a body praising the airflow. 1,654 of 4,008 reviews were affected. It was
+    invisible while nothing read the corpus and glaring the moment review text was quoted to
+    shoppers. `npm run db:fix-review-titles` repairs headlines surgically rather than regenerating
+    bodies and ratings. **Whenever generated text and generated numbers describe the same thing,
+    assert they agree** — §6 says a self-contradicting dataset is worse than none, and this is how
+    one gets in.
+32. **A backtick inside a `` sql`` `` template comment terminates the template.** Writing
+    "the `vec` and `lex` legs" in a SQL comment inside a tagged template ends the string, and the
+    error surfaces as `TS1005: ',' expected` pointing at prose — nowhere near a real syntax problem.
+
 28. **The image service admits roughly ONE anonymous request in flight.** Measured: 3 concurrent
     returned two 429s, 6 returned five. There is no throughput to win by parallelising — raising
     concurrency earns rate-limit errors, not images. What makes a long run finish is **retrying**,

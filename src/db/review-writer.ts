@@ -306,18 +306,35 @@ export function writeReview(input: {
 
   const body = [opener, capitaliseFirst(sentences.join(". ") + "."), closer].join(" ");
 
+  /*
+   * The headline names a quality, so its sentiment must come from THAT
+   * quality's score — not from the overall stars.
+   *
+   * Using the stars produced corpus-poisoning contradictions: a shoe scoring
+   * breathability 4 but durability 1 rates ~2.5 overall, so it was titled
+   * "Breathability is the weak spot" above a body correctly praising the
+   * airflow. The dataset's whole value is that prose, attributes and opinion
+   * agree (§6); a review arguing with itself is worse than no review, because
+   * retrieval learns the false association and nothing downstream can see it.
+   */
   const headline = mentions.length
-    ? titleFor(mentions[0], stars, rand)
+    ? titleFor(mentions[0], qualities[mentions[0]] ?? 3, rand)
     : stars >= 4 ? "Does the job" : "Fine, not remarkable";
 
   return { ratingBp, title: headline, body, mentions };
 }
 
-function titleFor(key: QualityKey, stars: number, rand: () => number): string {
+/**
+ * A headline about one quality, agreeing with what the body says about it.
+ *
+ * `qualityScore` is that quality's own 1-5 rating, deliberately NOT the
+ * reviewer's overall star rating — see the note at the call site.
+ */
+function titleFor(key: QualityKey, qualityScore: number, rand: () => number): string {
   const label = QUALITY_LABELS[key];
   const good = [`Great ${label}`, `The ${label} is the selling point`, `Nails the ${label}`];
   const bad = [`Let down by the ${label}`, `Watch the ${label}`, `${capitaliseFirst(label)} is the weak spot`];
-  return stars >= 4 ? pickFrom(good, rand) : pickFrom(bad, rand);
+  return qualityScore >= 4 ? pickFrom(good, rand) : pickFrom(bad, rand);
 }
 
 function capitaliseFirst(text: string): string {

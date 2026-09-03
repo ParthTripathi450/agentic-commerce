@@ -32,28 +32,27 @@ function chunkHash(body: string, ratingBp: number): string {
 }
 
 /**
- * Reviews carry their product's identity into the chunk text.
+ * The chunk is the OPINION, and nothing else.
  *
- * A bare review body ("my feet cooked in July") has no idea what it is about,
- * so a semantic search for "breathable running shoes" would never reach it.
- * Prefixing the product and category grounds the chunk without diluting it the
- * way folding it into the product document would.
+ * This used to prefix every chunk with "Review of <product> (<category>) — <n>
+ * out of 5", on the reasoning that a bare body has no idea what it is about. It
+ * is the wrong trade and §8.23 already says why: shared phrasing across
+ * documents compresses the embedding space. On a two-line review that boilerplate
+ * is half the tokens, so the vector ends up encoding the template that every
+ * chunk shares instead of the sentence that distinguishes it.
+ *
+ * It failed exactly as you would expect. "My feet get unbearably hot on long
+ * runs" retrieved THERMAL RUNNING TIGHTS as its best match at 0.643 — a garment
+ * whose entire purpose is to make you warm — because "Running", "Activewear"
+ * and a star rating dominated the comparison and the actual complaint did not.
+ *
+ * Grounding is not needed here anyway: `productId`, `merchantId` and `ratingBp`
+ * are COLUMNS on this table. They can be filtered, joined and displayed without
+ * being embedded, which is the reason the evidence lives in its own table
+ * rather than folded into the product document.
  */
-function chunkText(input: {
-  productTitle: string;
-  category: string;
-  ratingBp: number;
-  title: string | null;
-  body: string | null;
-}): string {
-  const stars = (input.ratingBp / 1000).toFixed(1);
-  return [
-    `Review of ${input.productTitle} (${input.category}) — ${stars} out of 5.`,
-    input.title ?? "",
-    input.body ?? "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+function chunkText(input: { title: string | null; body: string | null }): string {
+  return [input.title ?? "", input.body ?? ""].filter(Boolean).join(". ").trim();
 }
 
 export async function indexEvidence(options?: {
@@ -87,13 +86,7 @@ export async function indexEvidence(options?: {
   const hashBySource = new Map(existing.map((e) => [e.sourceId, e.sourceHash]));
 
   const prepared = rows.map((row) => {
-    const body = chunkText({
-      productTitle: row.product_title,
-      category: row.category,
-      ratingBp: Number(row.rating_bp),
-      title: row.title,
-      body: row.body,
-    });
+    const body = chunkText({ title: row.title, body: row.body });
     return {
       sourceId: row.id,
       productId: row.product_id,

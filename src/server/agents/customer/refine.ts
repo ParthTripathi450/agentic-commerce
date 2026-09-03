@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { normalizeTypography } from "@/lib/text";
+import { retrieveEvidence, type EvidenceChunk } from "@/server/catalog/evidence";
 import { formatMoney } from "@/lib/money";
 import { completeJson } from "@/server/ai/llm";
 import { getProductDetail, type ProductDetail, type ProductVariantView } from "@/server/catalog/product-page";
@@ -37,6 +38,12 @@ export type RefineResult = {
   /** Options that exist, so a refusal always comes with an alternative. */
   availableColors: string[];
   availableSizes: string[];
+  /**
+   * Real review sentences backing the reply, when the shopper asked something
+   * the reviews can answer. Quoted verbatim so the claim is traceable to a
+   * person who wrote it, never paraphrased into the reply and lost.
+   */
+  evidence: EvidenceChunk[];
   degraded: boolean;
 };
 
@@ -197,6 +204,7 @@ export async function refineProduct(input: {
         (availableSizes.length ? `Sizes: ${availableSizes.join(", ")}.` : ""),
       availableColors,
       availableSizes,
+      evidence: [],
       degraded,
     };
   }
@@ -207,6 +215,7 @@ export async function refineProduct(input: {
       reply: "I could not find a matching option for that.",
       availableColors,
       availableSizes,
+      evidence: [],
       degraded,
     };
   }
@@ -222,32 +231,46 @@ export async function refineProduct(input: {
       ? `${variant.availableQuantity} in stock`
       : "currently out of stock";
 
+  const answered =
+    parts.length === 0 && want.question
+      ? await answerFromProduct(product, variant, want.question)
+      : null;
+
   const reply = parts.length
     ? `Here it is ${parts.join(", ")} — ${described} at ${formatMoney(variant.priceMinor, variant.currency)}, ${stock}.`
-    : want.question
-      ? answerFromProduct(product, variant, want.question)
-      : `Showing ${described} at ${formatMoney(variant.priceMinor, variant.currency)}, ${stock}.`;
+    : (answered?.reply ??
+       `Showing ${described} at ${formatMoney(variant.priceMinor, variant.currency)}, ${stock}.`);
 
   return {
     variant,
     reply: normalizeTypography(reply),
     availableColors,
     availableSizes,
+    evidence: answered?.evidence ?? [],
     degraded,
   };
 }
 
 /**
- * Answers a question from the product's own published facts.
+ * Answers a question from the product's own published facts, and from what its
+ * buyers actually wrote.
  *
  * Deliberately not a free-form model answer: this is the one place a shopper is
- * most likely to be told something the catalogue never claimed.
+ * most likely to be told something the catalogue never claimed. The score is
+ * the summary and the quoted review is the evidence for it — "rates 4/5 for
+ * breathability" is a number nobody can act on, while "no swampy feeling even
+ * on long days" is the answer to the question they actually asked.
+ *
+ * Retrieval, not generation: the sentence is returned verbatim with its
+ * reviewer's rating. Nothing is summarised, so there is nothing to get wrong,
+ * and when no review is close enough the reply simply stays with the facts
+ * rather than reaching for the nearest thing.
  */
-function answerFromProduct(
+async function answerFromProduct(
   product: ProductDetail,
   variant: ProductVariantView,
   question: string,
-): string {
+): Promise<{ reply: string; evidence: EvidenceChunk[] }> {
   const qualities = (product.attributes as { qualities?: Record<string, number> }).qualities ?? {};
   /*
    * Matches a shared PREFIX in either direction.
@@ -268,15 +291,37 @@ function answerFromProduct(
     return words.some((word) => word.startsWith(stem) || head.startsWith(word.slice(0, 5)));
   });
 
+  // The shopper's own words are the query, not the quality key: reviews are
+  // prose, and "will these cook my feet" retrieves better against prose than
+  // the column name "breathability" does.
+  const evidence = await retrieveEvidence({
+    question,
+    productIds: [product.productId],
+    limit: 2,
+  }).catch(() => [] as EvidenceChunk[]);
+
   if (asked) {
     const label = asked.replace(/([A-Z])/g, " $1").toLowerCase().trim();
-    return `${product.title} rates ${qualities[asked]}/5 for ${label}. It is ${formatMoney(variant.priceMinor, variant.currency)} in ${Object.values(variant.attributes).join(" · ")}.`;
+    const summary = `${product.title} rates ${qualities[asked]}/5 for ${label}.`;
+    const quoted = evidence[0]
+      ? ` A buyer wrote: "${evidence[0].body}"`
+      : ` It is ${formatMoney(variant.priceMinor, variant.currency)} in ${Object.values(variant.attributes).join(" · ")}.`;
+    return { reply: summary + quoted, evidence };
   }
 
-  return (
-    `${product.title} — ${formatMoney(variant.priceMinor, variant.currency)}, ` +
-    `${variant.availableQuantity > 0 ? `${variant.availableQuantity} in stock` : "out of stock"}. ` +
-    `${product.merchant.returnsAccepted ? `${product.merchant.returnWindowDays}-day returns` : "No returns"} ` +
-    `from ${product.merchant.name}.`
-  );
+  if (evidence[0]) {
+    return {
+      reply: `Nothing in the spec covers that, but a buyer wrote: "${evidence[0].body}"`,
+      evidence,
+    };
+  }
+
+  return {
+    reply:
+      `${product.title} — ${formatMoney(variant.priceMinor, variant.currency)}, ` +
+      `${variant.availableQuantity > 0 ? `${variant.availableQuantity} in stock` : "out of stock"}. ` +
+      `${product.merchant.returnsAccepted ? `${product.merchant.returnWindowDays}-day returns` : "No returns"} ` +
+      `from ${product.merchant.name}.`,
+    evidence: [],
+  };
 }
