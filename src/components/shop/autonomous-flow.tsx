@@ -73,6 +73,8 @@ export function AutonomousFlow({
   const [focusQuality, setFocusQuality] = useState<string | null>(null);
   /** Which question the agent last asked, so its answer is routed correctly. */
   const pendingQuestion = useRef<string | null>(null);
+  /** The last thing actually searched for, so a focus answer can re-use it. */
+  const lastQuery = useRef<string>("");
   const [degraded, setDegraded] = useState(false);
 
   // Loaded up front: by the time the shopper clicks Allow, the widget must be
@@ -101,14 +103,29 @@ export function AutonomousFlow({
       const trimmed = text.trim();
       if (!trimmed && !opts.skipQuestions) return;
 
-      // A focus answer changes how results are ORDERED, not what is searched.
+      /*
+       * A focus answer changes how results are ORDERED, never what is searched.
+       *
+       * It was being recorded as the focus AND still sent as the message, so
+       * "packability" joined the search phrase — "i want shoes, road running,
+       * packability" — and the retrieval drifted from shoes to clothing,
+       * because shorts and base layers are the things actually rated highly
+       * for it. A shopper asking for shoes was shown shorts.
+       *
+       * So the word never reaches the query: the previous message is re-sent
+       * with the focus attached as a ranking input.
+       */
       let focus = opts.focus ?? focusQuality;
-      if (pendingQuestion.current === "focus" && trimmed) {
+      const answeringFocus = pendingQuestion.current === "focus" && Boolean(trimmed);
+      if (answeringFocus) {
         focus = trimmed;
         setFocusQuality(trimmed);
       }
       pendingQuestion.current = null;
 
+      const query = answeringFocus ? lastQuery.current : trimmed;
+
+      if (!answeringFocus && trimmed) lastQuery.current = trimmed;
       if (trimmed) setMessages((m) => m.concat({ role: "shopper", content: trimmed }));
       setChips([]);
       setChatting(true);
@@ -118,7 +135,7 @@ export function AutonomousFlow({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            message: trimmed,
+            message: query,
             answered,
             history,
             skipQuestions: opts.skipQuestions ?? false,
@@ -133,7 +150,9 @@ export function AutonomousFlow({
 
         const dto = data as TurnDto;
         setDegraded(Boolean(dto.provenance?.degraded));
-        const nextHistory: ChatTurn[] = [...history, { role: "shopper", content: trimmed }];
+        const nextHistory: ChatTurn[] = answeringFocus
+          ? history
+          : [...history, { role: "shopper" as const, content: trimmed }];
 
         if (dto.outcome === "asking" && dto.question) {
           // Remember which question this is, so the NEXT reply can be routed
@@ -261,6 +280,34 @@ export function AutonomousFlow({
     } catch {
       setPhase({ name: "failed", reason: "Could not add that to your cart." });
     }
+  }
+
+  /**
+   * Rejects the pick and carries the objection back into the conversation.
+   *
+   * The agent choosing is a proposal, not a conclusion. Denying used to end the
+   * run and lose everything already established — the purpose, size, colour and
+   * budget the shopper had just spent four questions answering. Their objection
+   * becomes the next thing they said, so the agent narrows rather than restarts.
+   */
+  async function keepLooking(outcome: Awaiting, note: string) {
+    setPhase({ name: "running" });
+
+    // Release the stock the agent was holding before searching again.
+    await fetch("/api/commerce/authorize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approvalId: outcome.approvalId, decision: "reject" }),
+    }).catch(() => undefined);
+
+    setMessages((m) =>
+      m.concat(
+        { role: "agent", content: `I picked ${outcome.selected.title}.` },
+        { role: "shopper", content: note },
+      ),
+    );
+    setPhase({ name: "idle" });
+    await send(note);
   }
 
   async function decide(outcome: Awaiting, decision: "approve" | "reject") {
@@ -436,6 +483,7 @@ export function AutonomousFlow({
           onApprove={() => decide(phase.outcome, "approve")}
           onDeny={() => decide(phase.outcome, "reject")}
           onAddToCart={() => addChoiceToCart(phase.outcome)}
+          onKeepLooking={(note) => keepLooking(phase.outcome, note)}
         />
       ) : null}
 
@@ -492,11 +540,74 @@ export function AutonomousFlow({
 }
 
 /** The single gate: what will be bought on the left, why on the right. */
+function NotRight({ onKeepLooking }: { onKeepLooking: (note: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+
+  const quick = [
+    "Too expensive",
+    "Show me something lighter",
+    "I want a different colour",
+    "Different brand please",
+  ];
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-xs text-primary underline underline-offset-4 hover:text-primary/80"
+      >
+        Not what I wanted — keep looking
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <p className="text-xs text-muted-foreground">
+        Tell me what is wrong with it and I will carry on from here.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {quick.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => onKeepLooking(q)}
+            className="rounded-full border border-border px-2.5 py-1 text-xs transition-colors hover:border-primary hover:text-primary"
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (note.trim()) onKeepLooking(note.trim());
+        }}
+      >
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="e.g. I wanted something under 3000"
+          aria-label="What was wrong with this pick?"
+          className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        />
+        <Button size="sm" type="submit" disabled={!note.trim()}>
+          Send
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 function AuthorizationScreen({
   outcome,
   onApprove,
   onDeny,
   onAddToCart,
+  onKeepLooking,
   savedMethod,
 }: {
   outcome: Awaiting;
@@ -504,6 +615,8 @@ function AuthorizationScreen({
   onDeny: () => void;
   /** Take the choice without the charge. */
   onAddToCart: () => void;
+  /** Reject the pick but stay in the conversation. */
+  onKeepLooking: (note: string) => void;
   savedMethod: string | null;
 }) {
   const { selected, totals } = outcome;
@@ -615,6 +728,16 @@ function AuthorizationScreen({
           <p className="text-xs text-subtle">
             Adding to the cart charges nothing and releases the stock the agent was holding.
           </p>
+
+          {/*
+            * Not happy with the pick? Say why.
+            *
+            * The agent choosing is not the end of the conversation — it is a
+            * proposal. Rejecting used to be a dead end that lost everything
+            * already established, so the objection is carried back into the
+            * chat as the next thing the shopper said.
+            */}
+          <NotRight onKeepLooking={onKeepLooking} />
 
           <p className="text-xs text-subtle">
             Razorpay test mode. Card 4100 2800 0000 1007, any future expiry, any CVV.
