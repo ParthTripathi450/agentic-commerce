@@ -11,6 +11,7 @@ import { signOutAction } from "@/server/auth/actions";
 
 const customerNav = (cartCount: number): NavItem[] => [
   { href: "/shop", label: "Shop with AI", icon: "shop" },
+  { href: "/browse", label: "Browse products", icon: "store" },
   { href: "/cart", label: "Your cart", icon: "cart", badge: cartCount || undefined },
   { href: "/orders", label: "Your orders", icon: "orders" },
   { href: "/reviews", label: "Your reviews", icon: "reviews" },
@@ -18,6 +19,7 @@ const customerNav = (cartCount: number): NavItem[] => [
 ];
 
 const CUSTOMER_SECONDARY: NavItem[] = [
+  { href: "/preferences", label: "What we've learned", icon: "insights" },
   { href: "/activity", label: "Agent activity", icon: "activity" },
   { href: "/settings/limits", label: "Spending limits", icon: "limits" },
 ];

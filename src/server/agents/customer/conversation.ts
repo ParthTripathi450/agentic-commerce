@@ -252,6 +252,14 @@ export async function understandConversation(input: {
   askedSlots: string[];
   /** Parsed intent for the deterministic fallback only. */
   fallbackIntent: ShoppingIntent;
+  /**
+   * Plain sentences about this shopper, from `describeKnowledge`.
+   *
+   * Prose, never scores — the same rule `explain.ts` follows. A model handed
+   * "brand Stride: 23.9" quotes the number back at the shopper as if it meant
+   * something, and starts doing arithmetic on a scale that is arbitrary.
+   */
+  knownAboutShopper?: string[];
 }): Promise<ConversationUnderstanding> {
   const fallback = () =>
     JSON.stringify(fallbackUnderstanding(input.turns, input.fallbackIntent, input.askedSlots));
@@ -270,6 +278,24 @@ export async function understandConversation(input: {
       : "",
     input.askedSlots.length >= MAX_TURNS
       ? "You have asked enough questions. Set readyToSearch true."
+      : "",
+    /*
+     * History informs the QUESTIONS, never the slots.
+     *
+     * The model may skip asking a size it can already infer, and may lean on
+     * a known preference when phrasing a suggestion. It must not silently
+     * FILL a slot from history: a shopper buying a gift, or simply changing
+     * their mind, would then get a search built from a preference they never
+     * stated this time and cannot see. Anything taken from the profile has to
+     * be said out loud so it can be contradicted.
+     */
+    input.knownAboutShopper?.length
+      ? [
+          "What we know about this shopper from their past orders and browsing:",
+          ...input.knownAboutShopper.map((line) => `- ${line}`),
+          "Use this to ask BETTER questions and to skip what you can already infer.",
+          "Do NOT fill a slot from it. If you rely on it, say so in your question so they can correct you.",
+        ].join("\n")
       : "",
   ]
     .filter(Boolean)

@@ -5,6 +5,7 @@ import { ProductDetailView } from "@/components/shop/product-detail";
 import { AlsoLike } from "@/components/shop/also-like";
 import { requireCustomer } from "@/lib/session";
 import { getProductDetail } from "@/server/catalog/product-page";
+import { recordProductView } from "@/server/shopper/signals";
 import { getProductReviewsDetailed } from "@/server/reviews/queries";
 import { RatingSummary, ReviewList } from "@/components/reviews/review-list";
 import { Card, CardBody } from "@/components/ui";
@@ -17,10 +18,22 @@ import { Card, CardBody } from "@/components/ui";
  * picked something start again from a query.
  */
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireCustomer();
+  const user = await requireCustomer();
   const { id } = await params;
   const product = await getProductDetail(id);
   if (!product) notFound();
+
+  // Opening a product is the weakest signal the knowledge base takes, and the
+  // only one not already implied by an order. Awaited rather than floated: a
+  // promise left dangling in a server component can be cut off when the
+  // response finishes, and this write is cheap and deduplicated anyway.
+  await recordProductView({
+    userId: user.id,
+    productId: product.productId,
+    category: product.category,
+    brand: product.brand,
+    priceMinor: product.variants[0]?.priceMinor ?? null,
+  });
 
   const { reviews, breakdown } = await getProductReviewsDetailed(product.productId, 20);
 

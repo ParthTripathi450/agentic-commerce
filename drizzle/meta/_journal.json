@@ -57,6 +57,13 @@
       "when": 1788427859653,
       "tag": "0007_variant_image",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788435520567,
+      "tag": "0008_modern_chameleon",
+      "breakpoints": true
     }
   ]
 }

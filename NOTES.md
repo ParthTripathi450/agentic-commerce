@@ -70,7 +70,8 @@ src/
   app/
     (auth)/login, register           auth pages, elevated form cards
     (app)/                           authenticated shell (dark sidebar + light content)
-      shop, cart, checkout, orders, support, activity, settings/limits
+      shop, browse, product/[id], cart, checkout, orders, reviews,
+      preferences, support, activity, settings/limits
       merchant/  (overview, products, products/[id], products/new, orders,
                   promotions, insights, support, protocols, settings)
     api/
@@ -92,9 +93,11 @@ src/
                             autonomous.ts, dto.ts
     agents/merchant/        agent.ts (insights), detectors.ts,
                             product-assistant.ts, listing-actions.ts
-    catalog/                search.ts, indexer.ts, normalize.ts, vocabulary.ts,
-                            featured.ts, actions.ts, image-actions.ts,
-                            create-product.ts (THE single writer), attributes.ts
+    catalog/                search.ts, browse.ts, indexer.ts, normalize.ts,
+                            vocabulary.ts, featured.ts, actions.ts,
+                            image-actions.ts, attributes.ts, facets.ts,
+                            create-product.ts (THE single writer)
+    shopper/                knowledge.ts (the taste profile), signals.ts
     commerce/               cart.ts, checkout.ts, gateway.ts, webhooks.ts,
                             expiry.ts, cart-actions.ts, refund.ts, test-utils.ts
     policy/engine.ts        the single gate for every consequential action
@@ -112,7 +115,7 @@ src/
 
 ---
 
-## 5. Data model (31 tables)
+## 5. Data model (32 tables)
 
 Core: `users, accounts, sessions, verification_tokens, signing_keys`
 Merchant: `merchants, merchant_policies, promotions`
@@ -121,6 +124,7 @@ Commerce: `carts, cart_items, checkout_sessions, orders, order_items, payments, 
 Agent/governance: `agent_sessions, agent_events, mandates, agent_policies, approvals, insights`
 Social: `product_reviews, merchant_reviews, support_threads, support_messages`
 Payment: `payment_methods`
+Shopper: `shopper_signals` (weak interest signals — searches, filters, product views)
 
 **Conventions:**
 - **All money is an integer in MINOR units** (paise). Never floats. `src/lib/money.ts` has
@@ -337,6 +341,60 @@ Two properties the harness must keep:
   NOT move when filtering was added — which is exactly right, and is where a stronger model would
   earn its keep.
 
+### Browsing the catalogue (`server/catalog/browse.ts` + `/browse`)
+**Deliberately not the agent's search.** They answer different questions: the agent answers "what
+should I buy?", so it ranks semantically, gates on relevance and refuses when the catalogue does not
+stock the kind of thing asked for. Browse answers "show me everything, let me narrow it", so it must
+be exhaustive, exactly countable and stably paginated.
+
+That rules out the embedding path here — cosine similarity has no honest notion of "how many match",
+so there is nothing to count and no natural end to the list. Browse is **SQL only**: no embedding
+call, no LLM call, no relevance gate. An empty result is the honest answer, because browse never
+claims a match.
+
+- **Facet counts are promises.** Each facet is counted with every filter applied EXCEPT its own, so
+  "Running Shoes (45)" means 45 results if you tick it. A test asserts the promise is kept, and that
+  the category facet partitions the result set exactly.
+- **Price bands are quartiles of what is currently on screen**, same rule as the suggestion chips,
+  and each is counted in the same pass. Bands abut at one paise, so the lower bound is rounded up
+  for the LABEL only — the paise-exact value stays in the URL.
+- **Price filters bite on the price actually shown** — the cheapest buyable variant. Filtering on any
+  variant's price surfaces products whose affordable size is out of stock.
+- Text matching reuses the weighted `search_vector`, widened with an ILIKE: stemming gets "shoes" to
+  "shoe" but never "veloc" to "Velocity", and a browse box is typed into a character at a time.
+- **Every filter lives in the URL**, so a filtered view is shareable and the back button works.
+
+### The shopper knowledge base (`server/shopper/knowledge.ts`)
+What we have learned about one shopper, derived **entirely from what they did** — nothing declared by
+them, nothing invented by a model. Every preference can name its evidence, because a profile whose
+reasoning cannot be shown is one the shopper cannot correct and the agent should not act on. It is
+visible in full at `/preferences`, with charts.
+
+**Actions are weighted by what they cost to take**: review (±5/−6) → purchase (+4) → basket (+2) →
+browse (+1), decayed on a 120-day half-life. A poor review outweighs a purchase deliberately — it is
+the shopper correcting a decision they already made, and if it did not outweigh it, buying-then-
+hating would still read as a like. Neutral reviews are dropped: "it was fine" is not a preference.
+
+**Preferences are a ranking nudge, never a filter.** `withAffinity()` gives history 15% of the score,
+mirroring `withFocus()` and applied after it, so what the shopper says now beats what we inferred
+earlier. Two properties keep it from becoming a filter bubble:
+- **0.5 is the neutral score, not 0.** An unfamiliar product scoring 0 would make this a 15% penalty
+  on everything new, and the agent would quietly stop showing anything they had not already bought.
+- **Axes are averaged, never summed.** Brand + merchant + colour all matching is usually one past
+  purchase restated three times.
+Budget is capped at half an axis's weight — almost every product sits inside a shopper's usual range,
+so unweighted it swamped everything and the criterion stopped discriminating.
+
+The conversation model gets the profile as **prose, never scores** (same rule as `explain.ts`), and
+is told it may use it to ask better questions but **must not fill a slot from it** — someone buying
+a gift, or simply changing their mind, would otherwise get a search built from a preference they
+never stated and cannot see.
+
+`shopper_signals` holds only the browsing half, and only the shape of the interest — no session id,
+IP, referrer or user agent. Views dedupe over 30 minutes, and `deleteShopperSignals` empties it.
+Orders and reviews are NOT erasable there: they are records of real transactions, not preferences we
+inferred.
+
 ### Recommendations (`server/catalog/recommendations.ts`)
 Two different questions, two sources. **`alsoBought`** is real co-purchase from `order_items` — what
 shoppers actually put in the same order, so it surfaces genuine complements (a t-shirt with running
@@ -477,6 +535,17 @@ never silently dropped from a combined total.
     because a marketplace that sells kitchen appliances IS nearer to "washing machine". Re-measure
     after any material catalogue change; never raise it to block a query, because that starts
     refusing products you actually sell ("noise cancelling headphones" sits at 0.373).
+26. **A client component importing a value from a module that imports `db` breaks the build.**
+    `browse-filters.tsx` ("use client") imported `BROWSE_SORTS` from `server/catalog/browse.ts`,
+    which dragged the `postgres` driver into the browser bundle:
+    `Module not found: Can't resolve 'net'` — and because it is a compile error, it 500s every
+    route, not just the new one. `import type` alone is erased and would have been safe; importing
+    a VALUE is what pulls the module graph across. Same rule as #14: what both sides share lives in
+    a module that imports neither side's machinery (`src/lib/browse.ts`).
+27. **A heading over an empty chart reads as a rendering failure.** Chart components that return
+    `null` for an empty set must take the label with them — otherwise the section title survives
+    over blank space and looks broken.
+
 25. **Tests that name a specific product are brittle at scale.** Two search tests pinned
     "Velocity Run 3" in the top 10 of a generic query. That held at 184 products; at 503 the ten
     returned depend on stock levels other suites legitimately mutate, so they passed alone and

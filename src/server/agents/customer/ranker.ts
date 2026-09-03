@@ -13,11 +13,15 @@ import type { Candidate, Rejected } from "@/server/catalog/search";
  * Same catalog + same query ⇒ same ranking, every time.
  */
 
+import { affinityFor, AFFINITY_WEIGHT, hasTaste, type TasteProfile } from "./affinity";
+
 export type Priority = "balanced" | "cheapest" | "fastest" | "best_quality" | "most_flexible";
 
 export type Weights = {
   /** Set when the shopper picked one rated feature to prioritise. */
   focus?: number;
+  /** Set when the shopper has enough history to have a taste profile. */
+  affinity?: number;
   relevance: number;
   price: number;
   availability: number;
@@ -184,6 +188,24 @@ export function withFocus(weights: Weights, focusKey: string | null | undefined)
   return { ...scaled, focus: FOCUS_WEIGHT };
 }
 
+/**
+ * Makes room for the shopper's own history, the same way `withFocus` does.
+ *
+ * Applied AFTER the focus weight so a feature the shopper just asked for still
+ * outranks a habit inferred from their past — what someone says in this
+ * conversation beats what we worked out about them from an earlier one.
+ */
+export function withAffinity(weights: Weights, enabled: boolean): Weights {
+  if (!enabled) return weights;
+  const scale = 1 - AFFINITY_WEIGHT;
+  const scaled = Object.fromEntries(
+    Object.entries(weights)
+      .filter(([k]) => k !== "affinity")
+      .map(([k, v]) => [k, (v as number) * scale]),
+  ) as Weights;
+  return { ...scaled, affinity: AFFINITY_WEIGHT };
+}
+
 export function rankCandidates(
   candidates: Candidate[],
   options: {
@@ -198,11 +220,19 @@ export function rankCandidates(
      * instead of it.
      */
     focusQuality?: string | null;
+    /**
+     * What we have learned about this shopper from their own orders, reviews
+     * and browsing. A nudge between near-equals, never a filter — see
+     * `affinity.ts`.
+     */
+    taste?: TasteProfile | null;
   } = {},
 ): RankingResult {
   const priority = options.priority ?? "balanced";
   const base: Weights = { ...WEIGHT_PRESETS[priority], ...options.weights };
-  const weights: Weights = withFocus(base, options.focusQuality);
+  const taste = options.taste ?? null;
+  const personalise = taste != null && hasTaste(taste);
+  const weights: Weights = withAffinity(withFocus(base, options.focusQuality), personalise);
 
   if (candidates.length === 0) {
     return { ranked: [], weights, priority, rejectedAlternatives: toRejectedAlternatives(options.rejected ?? []) };
@@ -340,6 +370,39 @@ export function rankCandidates(
             score === undefined
               ? "not rated for this feature"
               : `${score}/5 — the feature you asked me to prioritise`,
+        },
+      ]);
+    }
+
+    /*
+     * The shopper's own history.
+     *
+     * Carries its reasons with it so the explanation can say "you have bought
+     * Aeris before" rather than presenting a preference as an objective fact
+     * about the product. A shopper with no history never sees this criterion at
+     * all, rather than seeing one pinned at zero.
+     */
+    if (personalise && taste) {
+      const { normalized, reasons } = affinityFor(
+        {
+          brand: candidate.brand,
+          category: candidate.category,
+          merchantName: candidate.merchant.name,
+          colour: candidate.variant.attributes?.color,
+          priceMinor: candidate.variant.priceMinor,
+          qualities: (candidate.attributes as { qualities?: Record<string, number> })?.qualities,
+        },
+        taste,
+      );
+      parts.push([
+        "affinity",
+        {
+          name: "fits your usual choices",
+          weight: weights.affinity ?? 0,
+          value: round(normalized * 100),
+          normalized: round(normalized),
+          contribution: 0,
+          note: reasons.length > 0 ? reasons.join("; ") : "nothing in your history points either way",
         },
       ]);
     }

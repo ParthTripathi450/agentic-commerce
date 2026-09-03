@@ -13,6 +13,11 @@ import { parseIntentWithRules } from "./intent-rules";
 import { getVocabulary } from "@/server/catalog/vocabulary";
 import { explainSelection, type Explanation } from "./explain";
 import { intentToQuery } from "./intent";
+import {
+  buildKnowledgeBase,
+  describeKnowledge,
+  toTasteProfile,
+} from "@/server/shopper/knowledge";
 import { MAX_TURNS } from "./conversation";
 import type { ShoppingIntent } from "./intent-schema";
 import {
@@ -222,6 +227,21 @@ export async function runShoppingTurn(input: {
 
   const answered = input.answered ?? [];
 
+  /*
+   * What we already know about this shopper, from their own history.
+   *
+   * Loaded once per turn and used two ways: the ranker folds it into a small
+   * `affinity` criterion, and the conversation model is told about it in prose
+   * so it stops asking for things it could have looked up — being asked your
+   * shoe size for the fourth time is the failure this is here to fix.
+   *
+   * Best-effort. A profile is an improvement to a turn, never a precondition
+   * for one, so a failure here leaves the shopper with an unpersonalised agent
+   * rather than no agent.
+   */
+  const knowledge = await buildKnowledgeBase(input.userId).catch(() => null);
+  const taste = knowledge ? toTasteProfile(knowledge) : null;
+
   // ---------------------------------------------------------- UNDERSTAND
   const understandStartedAt = Date.now();
   /*
@@ -253,6 +273,7 @@ export async function runShoppingTurn(input: {
     turns,
     askedSlots: answered,
     fallbackIntent: parseIntentWithRules(shopperText || input.message, await getVocabulary()),
+    knownAboutShopper: knowledge ? describeKnowledge(knowledge) : undefined,
   });
 
   const intent = intentFromUnderstanding(understanding, shopperText);
@@ -623,6 +644,7 @@ export async function runShoppingTurn(input: {
     priority: intent.priority,
     budgetMinor: intent.priceMaxMinor,
     focusQuality,
+    taste,
     weights: input.criteriaOrder?.length ? weightsFromOrder(input.criteriaOrder) : undefined,
     rejected: search.rejected,
     limit: input.limit ?? 5,
