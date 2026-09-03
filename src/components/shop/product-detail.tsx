@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { addToCartAction } from "@/server/commerce/cart-actions";
 import type { ProductDetail } from "@/server/catalog/product-page";
 import { QualityBars, extractQualities, humanizeQuality } from "./quality-bars";
+import { ProductChat } from "./product-chat";
 
 /**
  * One product, everything needed to decide, and one way to act.
@@ -264,6 +265,17 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
           * waterproof shoes could not see the water-resistance rating that
           * answered their question.
           */}
+        {/* Chat drives the page's own selection, so picture, price and stock
+            all follow the conversation. */}
+        <ProductChat
+          productId={product.productId}
+          currentVariantId={variantId}
+          onVariant={(id) => {
+            setVariantId(id);
+            setAdded(false);
+          }}
+        />
+
         {Object.keys(qualities).length > 0 ? (
           <Card>
             <CardBody className="space-y-2.5">

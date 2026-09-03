@@ -238,6 +238,23 @@ without collapsing it into a single sort key, and a partial order is still valid
 thing that was asked for. A reorder replays the query rather than re-sorting client-side, so the
 score breakdown and explanation are regenerated from the new weights.
 
+### Refining one product (`server/agents/customer/refine.ts`)
+Once a shopper has chosen, their questions narrow — "in navy instead", "do you have an 11?",
+"is it breathable?" — and answering those with a fresh catalogue search is wrong twice: it can
+wander to a different product, and it discards the choice they already made. So the model reads the
+request and **code resolves it against THIS product's real variants**, which means the answer can
+only ever be something that exists.
+
+`resolveVariant` keeps whatever was not asked about (changing colour must not silently change size),
+prefers in-stock over out-of-stock, and when the combination does not exist it **refuses and names
+the real options** rather than returning the nearest thing. It distinguishes "we have no purple"
+from "we have white, but not in a 9".
+
+Two matching details that were wrong first time: the extractor must return a colour the shopper
+asked for **even when the catalogue lacks it** (dropping the word makes the refusal impossible), and
+feature questions match on a shared 5-character prefix in either direction — "breathable" must reach
+`breathability`, which neither exact matching nor suffix-stripping achieves.
+
 ### Selling a substitute (`server/agents/customer/alternatives.ts`)
 **The agent's job is to sell**, so an empty result is a lost sale — but only one kind of empty
 result may be recovered:
