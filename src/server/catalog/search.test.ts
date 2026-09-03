@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
+import { ensureStock } from "@/server/commerce/test-utils";
 import { hybridSearch, type StructuredQuery } from "./search";
 
 /**
@@ -32,6 +35,27 @@ describe("hybridSearch", () => {
     const merchants = new Set(candidates.map((c) => c.merchant.slug));
     expect(merchants.size).toBeGreaterThan(1);
     expect(stats.merchantsSearched).toBeGreaterThan(1);
+  });
+
+  /*
+   * Guarantees the one variant this file names is buyable.
+   *
+   * Integration suites share a database and legitimately consume stock (§8.11),
+   * so a test that asserts a SPECIFIC product is returned in stock has to put
+   * it there itself. Without this the test passed alone and failed roughly one
+   * run in three, depending on which suite had bought the last pair.
+   */
+  beforeAll(async () => {
+    const rows = (await db.execute(sql`
+      SELECT v.id FROM product_variants v
+      JOIN products p ON p.id = v.product_id
+      JOIN merchants m ON m.id = p.merchant_id
+      WHERE p.title LIKE 'Velocity Run 3%'
+        AND m.slug = 'stride-athletics'
+        AND v.attributes->>'color' = 'black'
+        AND v.attributes->>'size' = '10'
+    `)) as unknown as { id: string }[];
+    for (const row of rows) await ensureStock(row.id, 60);
   });
 
   it("surfaces the in-stock Velocity Run 3 at Stride Athletics", async () => {
