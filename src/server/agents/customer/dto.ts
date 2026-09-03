@@ -23,6 +23,12 @@ export type OptionDto = {
   compareAtPriceMinor: number | null;
   currency: string;
   variantAttributes: Record<string, string>;
+  /**
+   * The product's rated features (1–5), so a result card can show WHY it
+   * matched — a shopper asking for waterproof should see the rating, not have
+   * to open the product to find it.
+   */
+  qualities: Record<string, number>;
   availableQuantity: number;
   deliveryDays: number;
   returnWindowDays: number;
@@ -106,6 +112,17 @@ export type TurnDto = {
  * Shared by ranked results and alternatives so a substitute card can never
  * drift from a result card — they are the same product, differently framed.
  */
+/** Pulls the numeric feature ratings out of a product's attributes. */
+function extractQualityScores(attributes: Record<string, unknown>): Record<string, number> {
+  const raw = attributes?.qualities;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).filter(
+      (entry): entry is [string, number] => typeof entry[1] === "number",
+    ),
+  );
+}
+
 function toOption(item: {
   candidate: RankedItem["candidate"];
   rank: number;
@@ -128,6 +145,7 @@ function toOption(item: {
     compareAtPriceMinor: item.candidate.variant.compareAtPriceMinor,
     currency: item.candidate.variant.currency,
     variantAttributes: item.candidate.variant.attributes,
+    qualities: extractQualityScores(item.candidate.attributes),
     availableQuantity: item.candidate.variant.availableQuantity,
     deliveryDays: item.candidate.policies.standardDeliveryDays,
     returnWindowDays: item.candidate.policies.returnWindowDays,

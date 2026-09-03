@@ -11,6 +11,7 @@ import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { addToCartAction } from "@/server/commerce/cart-actions";
 import type { ProductDetail } from "@/server/catalog/product-page";
+import { QualityBars, extractQualities, humanizeQuality } from "./quality-bars";
 
 /**
  * One product, everything needed to decide, and one way to act.
@@ -29,6 +30,13 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
   const [error, setError] = useState<string | null>(null);
 
   const variant = product.variants.find((v) => v.variantId === variantId);
+  const qualities = extractQualities(product.attributes);
+  // Everything except the rated features, which get their own block above.
+  const specs = Object.fromEntries(
+    Object.entries(product.attributes as Record<string, unknown>).filter(
+      ([key]) => key !== "qualities",
+    ),
+  );
   const outOfStock = !variant || variant.availableQuantity === 0;
 
   return (
@@ -173,18 +181,41 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
           </CardBody>
         </Card>
 
-        {Object.keys(product.attributes).length > 0 ? (
+        {/*
+          * Rated features first, and separately from the spec sheet.
+          *
+          * These used to fall through `String(value)` on the qualities object
+          * and render as "[object Object]" — so someone searching for
+          * waterproof shoes could not see the water-resistance rating that
+          * answered their question.
+          */}
+        {Object.keys(qualities).length > 0 ? (
+          <Card>
+            <CardBody className="space-y-2.5">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Features
+              </p>
+              <QualityBars qualities={qualities} />
+            </CardBody>
+          </Card>
+        ) : null}
+
+        {Object.keys(specs).length > 0 ? (
           <Card>
             <CardBody className="space-y-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Specifications
               </p>
               <dl className="grid gap-1.5 text-sm sm:grid-cols-2">
-                {Object.entries(product.attributes).map(([key, value]) => (
+                {Object.entries(specs).map(([key, value]) => (
                   <div key={key} className="flex justify-between gap-3 border-b border-border py-1">
-                    <dt className="text-muted-foreground">{key}</dt>
+                    <dt className="text-muted-foreground">{humanizeQuality(key)}</dt>
                     <dd className="text-right font-medium">
-                      {Array.isArray(value) ? value.join(", ") : String(value)}
+                      {Array.isArray(value)
+                        ? value.join(", ")
+                        : typeof value === "boolean"
+                          ? value ? "Yes" : "No"
+                          : String(value)}
                     </dd>
                   </div>
                 ))}

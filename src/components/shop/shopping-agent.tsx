@@ -18,6 +18,7 @@ import { ClarifyPanel, ConversationTrail } from "./clarify-panel";
 // folded into the message identically on both sides.
 import { applyAnswer, type SlotId } from "@/server/agents/customer/clarify";
 import { AlsoLike } from "./also-like";
+import { QualityHighlights } from "./quality-bars";
 import { PriorityEditor } from "./priority-editor";
 import { FeaturedGrid } from "./featured-grid";
 import type { FeaturedProduct } from "@/server/catalog/featured";
@@ -527,6 +528,9 @@ function OptionCard({
             ) : null}
           </div>
         </div>
+
+        {/* What this product is actually good at, before the shopper clicks in. */}
+        <QualityHighlights qualities={option.qualities} />
 
         <div className="flex flex-wrap gap-1.5">
           <Badge tone={option.availableQuantity > 5 ? "success" : "warning"}>

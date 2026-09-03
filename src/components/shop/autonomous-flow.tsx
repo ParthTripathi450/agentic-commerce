@@ -2,9 +2,12 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
-import { Check, ShieldCheck, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, ShieldCheck, ShoppingCart, X } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
 import { ChatPanel, type ChatMessage } from "./chat-panel";
+import { AlsoLike } from "./also-like";
+import { addToCartAction } from "@/server/commerce/cart-actions";
 import type { TurnDto } from "@/server/agents/customer/dto";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { formatMoney } from "@/lib/money";
@@ -26,7 +29,9 @@ type Phase =
   | { name: "paying"; orderNumber: string }
   | { name: "paid"; orderNumber: string }
   | { name: "denied"; reason: string }
-  | { name: "failed"; reason: string; checks?: string[] };
+  | { name: "failed"; reason: string; checks?: string[] }
+  /** Chose the item but not the charge — it goes in the basket instead. */
+  | { name: "carted"; option: Awaiting["selected"] };
 
 const STEPS = [
   "Understanding what you asked for",
@@ -47,6 +52,7 @@ export function AutonomousFlow({
   /** Description of the stored test method, or null to use the widget. */
   savedMethod: string | null;
 }) {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
 
   /*
@@ -202,6 +208,38 @@ export function AutonomousFlow({
       setPhase({ name: "awaiting", outcome: data as Awaiting });
     } catch {
       setPhase({ name: "failed", reason: "Could not reach the agent." });
+    }
+  }
+
+  /**
+   * Take the agent's choice, but not the charge.
+   *
+   * Rejects the pending authorization FIRST. The agent has already reserved
+   * stock for its checkout session, so adding to the basket without releasing
+   * that would hold the same units twice — and the shopper would be blocked
+   * from buying the thing they just put in their cart.
+   */
+  async function addChoiceToCart(outcome: Awaiting) {
+    setPhase({ name: "running" });
+    try {
+      await fetch("/api/commerce/authorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approvalId: outcome.approvalId, decision: "reject" }),
+      });
+
+      const form = new FormData();
+      form.set("variantId", outcome.selected.variantId);
+      form.set("quantity", "1");
+      const result = await addToCartAction(null, form);
+
+      if (result?.error) {
+        setPhase({ name: "failed", reason: result.error });
+        return;
+      }
+      setPhase({ name: "carted", option: outcome.selected });
+    } catch {
+      setPhase({ name: "failed", reason: "Could not add that to your cart." });
     }
   }
 
@@ -377,6 +415,7 @@ export function AutonomousFlow({
           savedMethod={savedMethod}
           onApprove={() => decide(phase.outcome, "approve")}
           onDeny={() => decide(phase.outcome, "reject")}
+          onAddToCart={() => addChoiceToCart(phase.outcome)}
         />
       ) : null}
 
@@ -391,6 +430,30 @@ export function AutonomousFlow({
           been consumed so it cannot authorise another charge.
         </Alert>
       ) : null}
+      {phase.name === "carted" ? (
+        <div className="animate-fade-up space-y-4">
+          <Alert tone="success" title="Added to your cart">
+            <p>
+              {phase.option.title} is in your basket. Nothing has been charged, and the stock the
+              agent was holding has been released.
+            </p>
+          </Alert>
+
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => router.push("/checkout")}>Proceed to checkout</Button>
+            <Button variant="secondary" onClick={() => router.push("/cart")}>
+              View cart
+            </Button>
+            <Button variant="ghost" onClick={resetConversation}>
+              Keep shopping
+            </Button>
+          </div>
+
+          {/* What people who bought this also bought. */}
+          <AlsoLike productId={phase.option.productId} title={phase.option.title} />
+        </div>
+      ) : null}
+
       {phase.name === "denied" ? <Alert tone="neutral">{phase.reason}</Alert> : null}
       {phase.name === "failed" ? (
         <Alert tone="danger" title="Not completed">
@@ -413,11 +476,14 @@ function AuthorizationScreen({
   outcome,
   onApprove,
   onDeny,
+  onAddToCart,
   savedMethod,
 }: {
   outcome: Awaiting;
   onApprove: () => void;
   onDeny: () => void;
+  /** Take the choice without the charge. */
+  onAddToCart: () => void;
   savedMethod: string | null;
 }) {
   const { selected, totals } = outcome;
@@ -500,16 +566,30 @@ function AuthorizationScreen({
             ) : null}
           </div>
 
+          {/*
+            * Three outcomes, not two.
+            *
+            * The agent has chosen; that does not mean the shopper must buy now.
+            * Adding to the basket keeps the decision without the charge, and is
+            * the honest default for someone who wants to keep looking.
+            */}
           <div className="flex flex-wrap gap-2">
             <Button size="lg" onClick={onApprove} className="flex-1">
               <Check className="size-4" />
               Allow — pay {formatMoney(totals.totalMinor, totals.currency)}
             </Button>
-            <Button size="lg" variant="secondary" onClick={onDeny}>
+            <Button size="lg" variant="secondary" onClick={onAddToCart}>
+              <ShoppingCart className="size-4" />
+              Add to cart instead
+            </Button>
+            <Button size="lg" variant="ghost" onClick={onDeny}>
               <X className="size-4" />
               Deny
             </Button>
           </div>
+          <p className="text-xs text-subtle">
+            Adding to the cart charges nothing and releases the stock the agent was holding.
+          </p>
 
           <p className="text-xs text-subtle">
             Razorpay test mode. Card 4100 2800 0000 1007, any future expiry, any CVV.
