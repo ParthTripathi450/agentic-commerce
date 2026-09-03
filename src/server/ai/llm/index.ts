@@ -169,7 +169,18 @@ export async function completeJson<T>(
         },
       ],
     });
-    return { value: validate(parseLooseJson(repaired.text)), meta: repaired };
+    try {
+      return { value: validate(parseLooseJson(repaired.text)), meta: repaired };
+    } catch (repairError) {
+      // The repair failed too. Surface a described failure so the caller's
+      // deterministic fallback can run, rather than a raw parser error.
+      throw new LlmError(
+        `model did not return usable JSON after one repair attempt: ${
+          repairError instanceof Error ? repairError.message : String(repairError)
+        }`,
+        repaired.provider,
+      );
+    }
   }
 }
 
@@ -197,10 +208,28 @@ export function parseLooseJson(text: string): unknown {
     const closer = opener === "{" ? "}" : "]";
     const end = trimmed.lastIndexOf(closer);
     if (end > start) {
-      return JSON.parse(trimmed.slice(start, end + 1));
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1));
+      } catch {
+        /*
+         * A TRUNCATED response lands here: the model ran out of budget
+         * mid-object, so there is an opening brace and some closing one, but
+         * the slice between them is not valid JSON.
+         *
+         * This parse used to be unguarded, so it threw a bare
+         * "SyntaxError: Unexpected end of JSON input" with no stack beyond
+         * JSON.parse — which surfaced to the shopper as a 500 and an HTML
+         * error page, and read in the UI as "could not reach the agent".
+         * Callers all handle a failed parse; none of them could handle a
+         * cryptic error they could not attribute.
+         */
+      }
     }
   }
-  throw new Error(`response was not JSON: ${trimmed.slice(0, 200)}`);
+  throw new LlmError(
+    `response was not JSON (${trimmed.length} chars): ${trimmed.slice(0, 200)}`,
+    "router",
+  );
 }
 
 /** Which providers are usable right now — surfaced in the platform health view. */

@@ -65,18 +65,45 @@ export async function parseIntent(message: string): Promise<ParsedIntent> {
   const vocabulary = await getVocabulary();
   const rulesResult = () => parseIntentWithRules(message, vocabulary);
 
-  const { value, meta } = await completeJson(
-    {
-      task: "parse_intent",
-      system: systemPrompt(vocabulary),
-      messages: [{ role: "user", content: message }],
-      temperature: 0,
-      maxTokens: 900,
-      reasoningEffort: "low",
-      fallback: () => JSON.stringify(rulesResult()),
-    },
-    (raw) => shoppingIntentSchema.parse(raw),
-  );
+  /*
+   * The only LLM path here that had no deterministic fallback (§8.13).
+   *
+   * `fallback` covers a provider being unreachable, but not the model
+   * answering with something unparseable — and that threw out of the route as
+   * a 500, which the shopper saw as "could not reach the agent" rather than a
+   * degraded but working search. Rules answer this well enough to proceed.
+   *
+   * `maxTokens: 900` is also below the >= 1200 that reasoning models need
+   * (§8.7): they spend the budget thinking and return a truncated object,
+   * which is exactly the failure this now survives.
+   */
+  let value: ShoppingIntent;
+  let meta: Awaited<ReturnType<typeof completeJson<ShoppingIntent>>>["meta"];
+
+  try {
+    ({ value, meta } = await completeJson(
+      {
+        task: "parse_intent",
+        system: systemPrompt(vocabulary),
+        messages: [{ role: "user", content: message }],
+        temperature: 0,
+        maxTokens: 1400,
+        reasoningEffort: "low",
+        fallback: () => JSON.stringify(rulesResult()),
+      },
+      (raw) => shoppingIntentSchema.parse(raw),
+    ));
+  } catch {
+    value = rulesResult();
+    meta = {
+      text: "",
+      provider: "deterministic-fallback",
+      model: "rule-based",
+      latencyMs: 0,
+      degraded: true,
+      attempts: [],
+    };
+  }
 
   // Rules recover anything the model dropped: a model that misses "size 10"
   // would otherwise silently widen the search.
