@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { db } from "@/db";
+import { evidenceByTopic } from "@/server/catalog/evidence";
 import { resolveVariant } from "./refine";
 import type { ProductDetail, ProductVariantView } from "@/server/catalog/product-page";
 
@@ -110,5 +112,34 @@ describe("resolveVariant", () => {
       color: null, size: null, wantsCheapest: false,
     });
     expect(variant?.variantId).toBe("b");
+  });
+});
+
+describe("citations must be about what was asked", () => {
+  it("never quotes an off-topic review as the answer to a question", async () => {
+    // Scoped to one product every review is written in the same register about
+    // the same object, so they all score similarly against any question and
+    // nearest-chunk retrieval picks one about something else — "how is the grip
+    // on wet ground?" was answered with "nails the comfort". An off-topic
+    // citation is worse than none: it looks like evidence, so it is believed.
+    const product = await db.query.products.findFirst({
+      where: (p, { sql: raw }) =>
+        raw`${p.attributes} ? 'qualities' AND EXISTS (
+              SELECT 1 FROM evidence_chunks ec WHERE ec.product_id = ${p.id})`,
+      columns: { id: true, attributes: true, title: true },
+    });
+    if (!product) return;
+
+    const qualities = Object.keys(
+      (product.attributes as { qualities?: Record<string, number> }).qualities ?? {},
+    );
+    if (qualities.length === 0) return;
+
+    const byTopic = await evidenceByTopic(product.id, qualities, 1);
+
+    // Every chunk belongs to exactly one topic, so a quote offered for one
+    // quality can never also be the quote for another.
+    const ids = byTopic.flatMap((t) => t.chunks.map((c) => c.chunkId));
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

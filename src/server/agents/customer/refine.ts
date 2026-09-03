@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { normalizeTypography } from "@/lib/text";
-import { retrieveEvidence, type EvidenceChunk } from "@/server/catalog/evidence";
+import {
+  evidenceByTopic,
+  retrieveEvidence,
+  type EvidenceChunk,
+} from "@/server/catalog/evidence";
 import { formatMoney } from "@/lib/money";
 import { completeJson } from "@/server/ai/llm";
 import { getProductDetail, type ProductDetail, type ProductVariantView } from "@/server/catalog/product-page";
@@ -291,23 +295,42 @@ async function answerFromProduct(
     return words.some((word) => word.startsWith(stem) || head.startsWith(word.slice(0, 5)));
   });
 
-  // The shopper's own words are the query, not the quality key: reviews are
-  // prose, and "will these cook my feet" retrieves better against prose than
-  // the column name "breathability" does.
+  /*
+   * When the question names a quality, the quote MUST be about that quality.
+   *
+   * Nearest-chunk retrieval is not enough here. Scoped to one product every
+   * review is written in the same register about the same object, so they all
+   * score similarly against any question and the nearest one is often about
+   * something else — "how is the grip on wet ground?" was answered with "nails
+   * the comfort, wore them for twelve hours". An off-topic citation is worse
+   * than none: it looks like evidence, so it is believed, and it is not.
+   *
+   * `evidenceByTopic` assigns each chunk to the ONE topic it is most about, so
+   * asking it for this quality's bucket returns only sentences that are more
+   * about this than about anything else the product is rated on — or nothing.
+   */
+  if (asked) {
+    const label = asked.replace(/([A-Z])/g, " $1").toLowerCase().trim();
+    const summary = `${product.title} rates ${qualities[asked]}/5 for ${label}.`;
+
+    const byTopic = await evidenceByTopic(product.productId, Object.keys(qualities), 1)
+      .catch(() => [] as { topic: string; chunks: EvidenceChunk[] }[]);
+    const onTopic = byTopic.find((t) => t.topic === asked)?.chunks ?? [];
+
+    const quoted = onTopic[0]
+      ? ` A buyer wrote: "${onTopic[0].body}"`
+      : ` No review says much about that. It is ${formatMoney(variant.priceMinor, variant.currency)} in ${Object.values(variant.attributes).join(" · ")}.`;
+    return { reply: summary + quoted, evidence: onTopic };
+  }
+
+  // No quality named — an open question ("is the cushioning any good?"). Here
+  // the shopper's own words ARE the best query: reviews are prose, and free
+  // text retrieves against prose better than a column name would.
   const evidence = await retrieveEvidence({
     question,
     productIds: [product.productId],
     limit: 2,
   }).catch(() => [] as EvidenceChunk[]);
-
-  if (asked) {
-    const label = asked.replace(/([A-Z])/g, " $1").toLowerCase().trim();
-    const summary = `${product.title} rates ${qualities[asked]}/5 for ${label}.`;
-    const quoted = evidence[0]
-      ? ` A buyer wrote: "${evidence[0].body}"`
-      : ` It is ${formatMoney(variant.priceMinor, variant.currency)} in ${Object.values(variant.attributes).join(" · ")}.`;
-    return { reply: summary + quoted, evidence };
-  }
 
   if (evidence[0]) {
     return {
