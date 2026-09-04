@@ -595,6 +595,38 @@ purchases spread across 25 of the 57 categories — that is not a person, it is 
 the catalogue, and no profile can predict a uniform sample. Categories-per-purchase sits at 0.47,
 meaning roughly every other order enters a brand-new category.
 
+### Fitting the weights (`server/shopper/fit-weights.ts`, `npm run eval:fit-for-you`)
+The six axis weights in `DEFAULT_AXES` were typed by hand. This searches for better ones by
+coordinate descent against the for-you eval — coordinate descent because the objective is MRR over a
+ranking, a step function with no gradient to follow, and six coarse parameters sweep in seconds.
+
+**Cross-validated, because six parameters against 35 shoppers is a ratio that memorises.** Weights
+are chosen on training folds and scored on shoppers the search never saw; the reported set is the
+AVERAGE across folds, since picking the best-scoring fold would be choosing the luckiest split and
+calling it a result.
+
+**The result is a warning, not an upgrade:**
+
+| MRR | train | held out |
+|---|---|---|
+| hand-picked | 0.1040 | 0.1044 |
+| fitted | 0.3710 | **0.3314** |
+
+A 3.2x gain that survives held-out shoppers — and it should be **ignored**. Look at what it chose:
+`category` up to 1.24, `brand` halved, `merchant` and `colour` near zero, and **`quality` driven to
+exactly 0**.
+
+That is the persona generator, read back. `PERSONAS` are defined by category, brand and budget and
+encode no quality preference at all, so the fitter correctly discovered that quality predicts
+nothing *here* and deleted it. Applying that would remove the most portable part of a real profile —
+the part that lets "likes breathable, packable things" help in a category the shopper has never
+bought from — on the evidence of data that never contained it.
+
+**So nothing is applied automatically.** The fitter prints and stops; a person edits `DEFAULT_AXES`
+if they judge the numbers deserve to ship. This is the clearest demonstration available of why the
+harness came first: fitting against generated data learns the generator, and without the held-out
+column and a look at WHICH weights moved, a 3.2x number would have looked like success.
+
 ### Shoppers who behave like people (`db/personas.ts`, `npm run db:seed-personas`)
 The seed dealt orders out with `pick(customers)` — uniformly at random — so the average repeat
 shopper held 62 purchases across 25 of 57 categories. That is a sample of the catalogue, not a

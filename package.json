@@ -31,6 +31,7 @@
     "eval:generate": "tsx --env-file=.env.local src/db/generate-eval-set.ts",
     "eval:retrieval": "tsx --env-file=.env.local src/scripts/eval-retrieval.ts",
     "eval:for-you": "tsx --env-file=.env.local src/scripts/eval-for-you.ts",
+    "eval:fit-for-you": "tsx --env-file=.env.local src/scripts/fit-for-you.ts",
     "eval:relevance-gate": "tsx --env-file=.env.local src/scripts/measure-relevance-gate.ts"
   },
   "dependencies": {

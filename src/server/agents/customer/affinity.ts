@@ -72,14 +72,31 @@ type AffinityInput = {
  * is inside a shopper's usual range, so a weighted mean over equal axes handed
  * a full score to anything affordable and the criterion stopped discriminating.
  */
-const AXIS = {
+export type AxisWeights = {
+  brand: number;
+  category: number;
+  quality: number;
+  merchant: number;
+  colour: number;
+  budget: number;
+};
+
+/**
+ * The defaults, chosen by hand.
+ *
+ * Overridable so `fit-weights.ts` can search for better ones against the
+ * for-you eval rather than arguing about them — but NOT replaced by whatever
+ * that search returns. These orders are generated, so a fitted set would encode
+ * the seed's habits; the fitter reports, a human decides.
+ */
+export const DEFAULT_AXES: AxisWeights = {
   brand: 1,
   category: 0.8,
   quality: 1,
   merchant: 0.4,
   colour: 0.3,
   budget: 0.5,
-} as const;
+};
 
 /**
  * The personal score for one product, in 0..1 with **0.5 meaning "we have no
@@ -98,6 +115,7 @@ const AXIS = {
 export function affinityFor(
   item: AffinityInput,
   profile: TasteProfile,
+  axes: AxisWeights = DEFAULT_AXES,
 ): { normalized: number; reasons: string[] } {
   const parts: { value: number; weight: number }[] = [];
   const reasons: string[] = [];
@@ -108,10 +126,10 @@ export function affinityFor(
     const liked = profile.brands[brand];
     const disliked = profile.dislikedBrands[brand];
     if (liked) {
-      add(liked, AXIS.brand);
+      add(liked, axes.brand);
       reasons.push(`you have bought ${item.brand} before`);
     } else if (disliked) {
-      add(-disliked, AXIS.brand);
+      add(-disliked, axes.brand);
       reasons.push(`you rated ${item.brand} poorly`);
     }
   }
@@ -121,20 +139,20 @@ export function affinityFor(
     const liked = profile.categories[category];
     const disliked = profile.dislikedCategories[category];
     if (liked) {
-      add(liked, AXIS.category);
+      add(liked, axes.category);
       reasons.push("matches what you usually shop for");
-    } else if (disliked) add(-disliked, AXIS.category);
+    } else if (disliked) add(-disliked, axes.category);
   }
 
   const merchant = key(item.merchantName);
   if (merchant && profile.merchants[merchant]) {
-    add(profile.merchants[merchant], AXIS.merchant);
+    add(profile.merchants[merchant], axes.merchant);
     reasons.push(`${item.merchantName} has served you well`);
   }
 
   const colour = key(item.colour);
   if (colour && profile.colours[colour]) {
-    add(profile.colours[colour], AXIS.colour);
+    add(profile.colours[colour], axes.colour);
     reasons.push(`${item.colour} is a colour you go for`);
   }
 
@@ -155,11 +173,11 @@ export function affinityFor(
     if (rated >= 4) matched.push(humanise(name));
   }
   if (qualityWeight > 0) {
-    add(qualityScore / qualityWeight, AXIS.quality);
+    add(qualityScore / qualityWeight, axes.quality);
     if (matched.length > 0) reasons.push(`strong on ${matched.slice(0, 2).join(" and ")}`);
   }
 
-  if (profile.budget) add(budgetFit(item.priceMinor, profile.budget), AXIS.budget);
+  if (profile.budget) add(budgetFit(item.priceMinor, profile.budget), axes.budget);
 
   if (parts.length === 0) return { normalized: 0.5, reasons: [] };
 

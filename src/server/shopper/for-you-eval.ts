@@ -1,6 +1,11 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { affinityFor, type TasteProfile } from "@/server/agents/customer/affinity";
+import {
+  affinityFor,
+  DEFAULT_AXES,
+  type AxisWeights,
+  type TasteProfile,
+} from "@/server/agents/customer/affinity";
 import { buildKnowledgeBase, toTasteProfile } from "./knowledge";
 
 /**
@@ -197,9 +202,23 @@ function summarise(ranks: (number | null)[]): Metrics {
   };
 }
 
-export async function evaluateForYou(options: { limit?: number } = {}): Promise<EvalResult> {
-  const cases = await repeatShoppers(options.limit ?? 500);
-  const catalogue = await loadCandidates();
+export async function evaluateForYou(
+  options: {
+    limit?: number;
+    /** Axis weights to score with. Defaults to the ones the app ships. */
+    axes?: AxisWeights;
+    /** Restrict to these shoppers — used for cross-validation folds. */
+    only?: Set<string>;
+    /** Pre-loaded so a weight search does not re-query per candidate set. */
+    preloaded?: PreparedCases;
+  } = {},
+): Promise<EvalResult> {
+  const axes = options.axes ?? DEFAULT_AXES;
+  const prepared = options.preloaded ?? (await prepareCases(options.limit ?? 500));
+  const cases = options.only
+    ? prepared.cases.filter((c) => options.only!.has(c.userId))
+    : prepared.cases;
+  const catalogue = prepared.catalogue;
 
   const affinityRanks: (number | null)[] = [];
   const popularityRanks: (number | null)[] = [];
@@ -208,17 +227,15 @@ export async function evaluateForYou(options: { limit?: number } = {}): Promise<
   let poolSize = 0;
 
   for (const shopperCase of cases) {
-    const knowledge = await buildKnowledgeBase(shopperCase.userId, { asOf: shopperCase.asOf });
-    const taste: TasteProfile = toTasteProfile(knowledge);
-
+    const taste = prepared.tastes.get(shopperCase.userId);
     // Nothing known before the cutoff means nothing to predict from; scoring it
     // would measure the catalogue's popularity, not the profile.
-    if (knowledge.isEmpty) {
+    if (!taste) {
       skipped++;
       continue;
     }
 
-    const owned = await ownedBefore(shopperCase.userId, shopperCase.asOf);
+    const owned = prepared.owned.get(shopperCase.userId) ?? new Set<string>();
     const targets = new Set(shopperCase.targetProductIds);
     const pool = catalogue.filter((c) => !owned.has(c.productId) || targets.has(c.productId));
 
@@ -242,6 +259,7 @@ export async function evaluateForYou(options: { limit?: number } = {}): Promise<
             qualities: c.qualities,
           },
           taste,
+          axes,
         ).normalized,
       }))
       .sort((a, b) => b.score - a.score)
@@ -279,4 +297,34 @@ function hash(value: string): number {
   let h = 0;
   for (let i = 0; i < value.length; i++) h = (Math.imul(31, h) + value.charCodeAt(i)) | 0;
   return Math.abs(h);
+}
+
+/**
+ * Everything the eval needs, loaded once.
+ *
+ * A weight search calls `evaluateForYou` hundreds of times, and rebuilding
+ * every profile from the database on each pass would make the search take
+ * minutes instead of seconds for no different answer — the profiles do not
+ * depend on the axis weights being searched.
+ */
+export type PreparedCases = {
+  cases: ShopperCase[];
+  catalogue: Candidate[];
+  tastes: Map<string, TasteProfile>;
+  owned: Map<string, Set<string>>;
+};
+
+export async function prepareCases(limit = 500): Promise<PreparedCases> {
+  const cases = await repeatShoppers(limit);
+  const catalogue = await loadCandidates();
+  const tastes = new Map<string, TasteProfile>();
+  const owned = new Map<string, Set<string>>();
+
+  for (const shopperCase of cases) {
+    const knowledge = await buildKnowledgeBase(shopperCase.userId, { asOf: shopperCase.asOf });
+    if (!knowledge.isEmpty) tastes.set(shopperCase.userId, toTasteProfile(knowledge));
+    owned.set(shopperCase.userId, await ownedBefore(shopperCase.userId, shopperCase.asOf));
+  }
+
+  return { cases, catalogue, tastes, owned };
 }
