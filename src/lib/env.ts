@@ -34,9 +34,33 @@ const schema = z.object({
    * daily pool — one exhausted model no longer takes the whole agent down.
    */
   GROQ_FAST_MODEL: z.string().default("openai/gpt-oss-20b"),
-  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
-  OPENROUTER_MODEL: z.string().default("meta-llama/llama-3.3-70b-instruct:free"),
-  CEREBRAS_MODEL: z.string().default("llama-3.3-70b"),
+  /**
+   * `gemini-flash-latest`, not a pinned version.
+   *
+   * Verified against this account: `gemini-2.5-flash` returns 429 on the free
+   * quota and `gemini-2.0-flash` is retired outright ("no longer available"),
+   * while the floating alias answers normally. Every provider here rotates its
+   * catalogue (§8.6), and for a FAILOVER path a name that keeps working
+   * unattended beats a pin that quietly becomes a 404 on the day it is needed.
+   */
+  GEMINI_MODEL: z.string().default("gemini-flash-latest"),
+  /**
+   * The previous default stopped being free: OpenRouter answers
+   * `meta-llama/llama-3.3-70b-instruct:free` with a 404 pointing at the paid
+   * slug. `z-ai/glm-5.2:free` was picked by listing the account's free models
+   * and testing each on a JSON request — it returned clean, parseable JSON,
+   * where `nvidia/nemotron-3-ultra-550b-a55b:free` answered 200 with malformed
+   * output, which is worse than failing.
+   */
+  OPENROUTER_MODEL: z.string().default("z-ai/glm-5.2:free"),
+  /**
+   * `llama-3.3-70b` does not exist on Cerebras any more; the account offers
+   * `gpt-oss-120b`, `qwen-3.8-27b` and `gemma-4-31b`. The name is corrected
+   * here, but note every one of them returns **402 Payment required** on this
+   * account — Cerebras cannot serve the no-card constraint (§1) today, so it
+   * is configured, harmless, and simply failed past.
+   */
+  CEREBRAS_MODEL: z.string().default("gpt-oss-120b"),
   OLLAMA_MODEL: z.string().default("llama3.1"),
 
   // --- Payments ---
