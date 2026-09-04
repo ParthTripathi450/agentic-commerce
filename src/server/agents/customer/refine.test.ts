@@ -315,3 +315,65 @@ describe("asking for the reviews themselves", () => {
     expect(result!.evidence).toEqual([]);
   });
 });
+
+describe("answering from whatever the merchant published", () => {
+  async function shoeWithSpecs() {
+    const [row] = (await db.execute(sql`
+      SELECT id FROM products
+      WHERE status = 'active' AND attributes ? 'weightGrams' AND attributes ? 'qualities'
+      LIMIT 1
+    `)) as unknown as { id: string }[];
+    return row?.id ?? null;
+  }
+
+  it("answers a weight question from weightGrams, with its unit", async () => {
+    // 170-odd distinct attribute keys exist across the catalogue, so a handler
+    // per question is not a plan and enumerating them is §8.21's trap. The
+    // question is matched against the product's OWN keys instead.
+    const id = await shoeWithSpecs();
+    if (!id) return;
+
+    const result = await refineProduct({ productId: id, message: "How much do they weigh" });
+    expect(result!.reply).toMatch(/weight/i);
+    expect(result!.reply).toMatch(/\d+\s*g\b/);
+  });
+
+  it("reads the unit off the key, so a heel drop is millimetres", async () => {
+    const [row] = (await db.execute(sql`
+      SELECT id FROM products WHERE status = 'active' AND attributes ? 'dropMm' LIMIT 1
+    `)) as unknown as { id: string }[];
+    if (!row) return;
+
+    const result = await refineProduct({ productId: row.id, message: "what is the drop" });
+    // Filtering short tokens out of the key name dropped the "Mm" and reported
+    // an 8 mm drop as "drop: 8".
+    expect(result!.reply).toMatch(/\d+\s*mm\b/);
+  });
+
+  it("names the strong points when asked what it is good at", async () => {
+    const id = await shoeWithSpecs();
+    if (!id) return;
+
+    const result = await refineProduct({
+      productId: id,
+      message: "What are some of its good performing features?",
+    });
+    expect(result!.reply).toMatch(/\d\/5/);
+  });
+
+  it("says what it does not know instead of reciting price and stock", async () => {
+    // This fallback is why every gap went unnoticed: unanswered questions came
+    // back looking answered. A catch-all that always produces a plausible
+    // sentence turns a missing feature into a silent one.
+    const id = await shoeWithSpecs();
+    if (!id) return;
+
+    const result = await refineProduct({
+      productId: id,
+      message: "who manufactures the laces",
+    });
+    expect(result!.reply.toLowerCase()).toContain("does not cover");
+    // And it says what it CAN answer, so the dead end becomes a next step.
+    expect(result!.reply.toLowerCase()).toContain("colours and sizes");
+  });
+});

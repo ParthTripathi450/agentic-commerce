@@ -364,6 +364,11 @@ async function answerFromProduct(
   const reviews = await answerAboutReviews(product, question);
   if (reviews) return reviews;
 
+  // "What is it good at?" names no quality in particular, so the single-quality
+  // matcher below never fired and it fell through to the catch-all.
+  const strengths = answerAboutStrengths(product, question);
+  if (strengths) return { reply: strengths, evidence: [] };
+
   const qualities = (product.attributes as { qualities?: Record<string, number> }).qualities ?? {};
   /*
    * Matches a shared PREFIX in either direction.
@@ -412,6 +417,11 @@ async function answerFromProduct(
     return { reply: summary + quoted, evidence: onTopic };
   }
 
+  // Any published specification, matched against the product's OWN attribute
+  // keys — "how much do they weigh" against `weightGrams: 245`.
+  const spec = answerAboutSpec(product, question);
+  if (spec) return { reply: spec, evidence: [] };
+
   // No quality named — an open question ("is the cushioning any good?"). Here
   // the shopper's own words ARE the best query: reviews are prose, and free
   // text retrieves against prose better than a column name would.
@@ -428,12 +438,36 @@ async function answerFromProduct(
     };
   }
 
+  /*
+   * Say that we do not know, instead of reciting price and stock.
+   *
+   * This fallback is why every gap above went unnoticed for so long: colours,
+   * sizes, returns, reviews, weight and strengths were all unanswered, and all
+   * of them came back looking answered. A catch-all that always produces a
+   * plausible sentence turns a missing feature into a silent one.
+   *
+   * Naming what the listing DOES cover turns the dead end into a next step, and
+   * it is generated from this product's own attributes rather than a fixed list
+   * of suggestions, so it stays true as the catalogue grows.
+   */
+  const known = Object.keys(product.attributes as Record<string, unknown>)
+    .filter((k) => k !== "qualities")
+    .slice(0, 5)
+    .map((k) => keyWords(k).filter((w) => w.length >= 3).join(" "))
+    .filter(Boolean);
+
+  const canAnswer = [
+    "colours and sizes",
+    "returns and delivery",
+    "reviews",
+    ...known,
+  ].slice(0, 6);
+
   return {
     reply:
-      `${product.title} — ${formatMoney(variant.priceMinor, variant.currency)}, ` +
-      `${variant.availableQuantity > 0 ? `${variant.availableQuantity} in stock` : "out of stock"}. ` +
-      `${product.merchant.returnsAccepted ? `${product.merchant.returnWindowDays}-day returns` : "No returns"} ` +
-      `from ${product.merchant.name.replace(/\.$/, "")}.`,
+      `The listing does not cover that. I can tell you about ${canAnswer.join(", ")} — ` +
+      `or it is ${formatMoney(variant.priceMinor, variant.currency)}, ` +
+      `${variant.availableQuantity > 0 ? `${variant.availableQuantity} in stock` : "out of stock"}.`,
     evidence: [],
   };
 }
@@ -562,4 +596,120 @@ async function answerAboutReviews(
     : `Here are a few of the ${total} review${total === 1 ? "" : "s"} for ${product.title}:`;
 
   return { reply: summary, evidence: chunks };
+}
+
+/**
+ * camelCase key -> its words, units included.
+ *
+ * Short tokens are kept: filtering them out dropped the "Mm" from `dropMm` and
+ * the unit went with it, so an 8 mm heel drop was reported as "drop: 8".
+ * Matching filters for length separately, where it belongs.
+ */
+function keyWords(key: string): string[] {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Units live in the key name, so they come out of it.
+ *
+ * The catalogue carries `weightGrams`, `dropMm`, `batteryHours`, `capacityMl`
+ * and a hundred more. Reading the unit off the key means every one of them
+ * formats correctly without a table that would be out of date by the next
+ * category.
+ */
+const UNITS: Record<string, string> = {
+  grams: " g", gsm: " gsm", mm: " mm", cm: " cm", ml: " ml", litres: " litres",
+  hours: " hours", days: " days", minutes: " minutes", seconds: "s",
+  watts: " W", mah: " mAh", hrc: " HRC", inches: " in", kg: " kg", c: "°C",
+};
+
+function describeSpec(key: string, value: unknown): string {
+  const words = keyWords(key);
+  const unit = UNITS[words[words.length - 1] ?? ""] ?? "";
+  const label = (unit ? words.slice(0, -1) : words).join(" ") || key;
+
+  if (typeof value === "boolean") return `${label}: ${value ? "yes" : "no"}`;
+  if (Array.isArray(value)) return `${label}: ${value.join(", ")}`;
+  return `${label}: ${String(value)}${unit}`;
+}
+
+/**
+ * Answers from whatever the merchant actually published.
+ *
+ * There are 170-odd distinct attribute keys across this catalogue, so a handler
+ * per question is not a plan and enumerating them is §8.21's trap. The question
+ * is matched against the product's OWN keys instead, which means a category
+ * that starts publishing `carbonPlate` or `tankLitres` is answerable the day it
+ * appears, with no code change.
+ */
+function answerAboutSpec(product: ProductDetail, question: string): string | null {
+  const words = wordsOf(question);
+  const attributes = product.attributes as Record<string, unknown>;
+
+  for (const [key, value] of Object.entries(attributes)) {
+    if (key === "qualities" || value == null || value === "") continue;
+    // Only the meaningful words are matched on; a two-letter unit like "mm"
+    // would otherwise match half the questions ever asked.
+    const target = keyWords(key).filter((w) => w.length >= 3);
+    const hit = target.some((t) => words.some((w) => looselyMatches(w, t)));
+    if (hit) return `${product.title} — ${describeSpec(key, value)}.`;
+  }
+  return null;
+}
+
+/**
+ * "What is it good at?" — the strong points, without naming one.
+ *
+ * Answered from the same 1-5 scores the feature bars draw, and only the ones
+ * genuinely rated well: listing everything it is measured on would answer a
+ * different question and quietly imply the weak scores were strengths.
+ */
+function answerAboutStrengths(product: ProductDetail, question: string): string | null {
+  const words = wordsOf(question);
+
+  const asksWhatIsGood =
+    words.some((w) =>
+      ["good", "best", "great", "strong", "strength", "strengths", "excel", "standout"].some((t) =>
+        looselyMatches(w, t),
+      ),
+    ) ||
+    words.some((w) => looselyMatches(w, "feature") || looselyMatches(w, "highlight"));
+
+  if (!asksWhatIsGood) return null;
+
+  const qualities = (product.attributes as { qualities?: Record<string, number> }).qualities ?? {};
+  const strong = Object.entries(qualities)
+    .filter(([, v]) => v >= 4)
+    .sort((a, b) => b[1] - a[1]);
+
+  const features = Array.isArray((product.attributes as { features?: unknown }).features)
+    ? ((product.attributes as { features: unknown[] }).features.filter(
+        (f): f is string => typeof f === "string",
+      ))
+    : [];
+
+  if (strong.length === 0 && features.length === 0) return null;
+
+  const rated = strong
+    .map(([key, score]) => `${key.replace(/([A-Z])/g, " $1").toLowerCase().trim()} ${score}/5`)
+    .join(", ");
+
+  const parts = [
+    strong.length > 0 ? `${product.title} rates highest for ${rated}.` : null,
+    features.length > 0 ? `Listed features: ${features.join(", ")}.` : null,
+    // Said plainly rather than omitted — a shopper choosing on strengths
+    // deserves the other half.
+    strong.length > 0 && Object.keys(qualities).length > strong.length
+      ? `Weakest: ${Object.entries(qualities)
+          .filter(([, v]) => v <= 2)
+          .map(([k, v]) => `${k.replace(/([A-Z])/g, " $1").toLowerCase().trim()} ${v}/5`)
+          .join(", ") || "nothing scores badly"}.`
+      : null,
+  ].filter(Boolean);
+
+  return parts.join(" ");
 }

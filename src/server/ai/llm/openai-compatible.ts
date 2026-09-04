@@ -42,9 +42,44 @@ export function createOpenAiCompatibleProvider(config: {
        * splitting it off both costs fewer tokens and means an exhausted model
        * no longer takes the whole agent down with it.
        */
-      const model =
+      const preferred =
         options.task === "parse_intent" && config.fastModel ? config.fastModel() : config.model();
 
+      /*
+       * The provider's own models are the first place to fail over to.
+       *
+       * The cap is per model per day, which is the whole reason `fastModel`
+       * exists — but a 429 on the primary went straight past its sibling to the
+       * next PROVIDER, and when that was rate-limited too the agent dropped to
+       * deterministic fallbacks with a perfectly healthy model sitting unused.
+       * Measured on this account: gpt-oss-120b returned "tokens per day (TPD):
+       * Limit 200000" while gpt-oss-20b answered normally, and every
+       * conversational turn was running degraded.
+       *
+       * `npm run doctor` hid it, too — it exercises one model and reported the
+       * provider healthy while the model the conversation actually uses was
+       * exhausted.
+       */
+      const alternates = [preferred, config.model(), config.fastModel?.()].filter(
+        (m, i, all): m is string => Boolean(m) && all.indexOf(m) === i,
+      );
+
+      let lastError: LlmError | undefined;
+
+      for (const candidate of alternates) {
+        try {
+          return await attempt(candidate);
+        } catch (cause) {
+          const failure = cause as LlmError;
+          // Only a quota or outage is worth trying a sibling for; a malformed
+          // request will fail identically on every model.
+          if (!(failure instanceof LlmError) || !failure.retryable) throw failure;
+          lastError = failure;
+        }
+      }
+      throw lastError ?? new LlmError("no model could serve this request", config.name);
+
+      async function attempt(model: string) {
       const body: Record<string, unknown> = {
         model,
         messages,
@@ -116,6 +151,7 @@ export function createOpenAiCompatibleProvider(config: {
         tokensOut: payload.usage?.completion_tokens,
         latencyMs: Date.now() - startedAt,
       };
+      }
     },
   };
 }
