@@ -645,6 +645,7 @@ export async function runShoppingTurn(input: {
     budgetMinor: intent.priceMaxMinor,
     focusQuality,
     taste,
+    queryText: intent.productQuery,
     weights: input.criteriaOrder?.length ? weightsFromOrder(input.criteriaOrder) : undefined,
     rejected: search.rejected,
     limit: input.limit ?? 5,

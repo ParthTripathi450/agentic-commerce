@@ -90,7 +90,8 @@ src/
     migrate.ts, reset.ts
   server/
     agents/customer/        agent.ts (state machine), intent*, ranker, explain,
-                            autonomous.ts, dto.ts
+                            autonomous.ts, dto.ts, affinity.ts, purpose.ts,
+                            refine.ts, alternatives.ts
     agents/merchant/        agent.ts (insights), detectors.ts,
                             product-assistant.ts, listing-actions.ts
     catalog/                search.ts, browse.ts, evidence.ts, indexer.ts, normalize.ts,
@@ -247,6 +248,31 @@ did, and two calls per turn doubled free-tier token burn for no extra informatio
 is rule-parsed rather than empty.
 
 **Autonomous mode passes `skipQuestions: true`** — nobody is at the keyboard to answer.
+
+### What a product is FOR (`server/agents/customer/purpose.ts`)
+Relevance cannot separate a leather dress shoe from a leather sneaker — they are genuinely close in
+both embedding and keyword space — so "formal shoes for the office" put Court Sneakers second, ahead
+of three dress shoes, on a margin of 0.010. The catalogue is not ambiguous though: the dress shoe
+carries `use: "formal"` and a feature called "interview"; the sneaker carries
+`useCase: "everyday wear and casual court style"`. It declares itself casual, and nothing was reading
+that.
+
+`purposeMatch()` scores the overlap between the request and the purpose fields the MERCHANT wrote
+(`useCase`, `use`, `style`, `activity`, `occasion`, `fit`, plus `features`), carved into the ranker at
+`PURPOSE_WEIGHT = 0.1` — a tie-breaker between things relevance already judged comparable, never more.
+
+Three rules keep it safe:
+- **It ranks, never filters.** §8.8 is about a *guessed* category becoming a hard filter; this scores
+  published text and cannot remove a product from consideration.
+- **Silence is neutral (0.5), never negative.** Around a third of the catalogue publishes no purpose
+  text — the Windshell Packable Running Jacket has none and is a correct answer for "a warm winter
+  jacket". Penalising absence is a data-completeness bias dressed up as relevance.
+- **`features` may EARN a match but never trigger the mismatch penalty.** "interview" genuinely
+  answers "for the office", but "reflective trim" is not a statement of purpose, and counting it as
+  one marked down every product that listed features and no purpose.
+
+Scored on the share of the QUERY's words accounted for, so a long marketing sentence cannot outscore
+a precise one by length.
 
 ### Shopper-controlled ranking (`ranker.ts` + `priority-editor.tsx`)
 The weights are **shown, not hidden** — a ranking whose priorities are invisible cannot be argued

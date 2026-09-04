@@ -14,6 +14,7 @@ import type { Candidate, Rejected } from "@/server/catalog/search";
  */
 
 import { affinityFor, AFFINITY_WEIGHT, hasTaste, type TasteProfile } from "./affinity";
+import { NEUTRAL_PURPOSE, purposeMatch } from "./purpose";
 
 export type Priority = "balanced" | "cheapest" | "fastest" | "best_quality" | "most_flexible";
 
@@ -22,6 +23,8 @@ export type Weights = {
   focus?: number;
   /** Set when the shopper has enough history to have a taste profile. */
   affinity?: number;
+  /** Set when the request says what the product is FOR. */
+  purpose?: number;
   relevance: number;
   price: number;
   availability: number;
@@ -192,7 +195,7 @@ const FOCUS_WEIGHT = 0.24;
  * Everything else is scaled proportionally so the weights still sum to 1 and
  * the displayed contributions remain percentages of something real.
  */
-function carve(weights: Weights, key: "focus" | "affinity", share: number): Weights {
+function carve(weights: Weights, key: "focus" | "affinity" | "purpose", share: number): Weights {
   const protectedTotal = weights.relevance;
   const flexible = Object.entries(weights).filter(
     ([k]) => k !== key && k !== "relevance",
@@ -226,6 +229,21 @@ export function withAffinity(weights: Weights, enabled: boolean): Weights {
   return carve(weights, "affinity", AFFINITY_WEIGHT);
 }
 
+/**
+ * Share of the score given to what a product says it is FOR.
+ *
+ * Small, because it is only ever a tie-breaker between things relevance already
+ * judged comparable. The margin it needs to overturn is real but narrow — the
+ * Court Sneakers beat a dress shoe by 0.010 on "formal shoes for the office" —
+ * and anything larger would let a merchant's phrasing outrank the product.
+ */
+const PURPOSE_WEIGHT = 0.1;
+
+export function withPurpose(weights: Weights, enabled: boolean): Weights {
+  if (!enabled) return weights;
+  return carve(weights, "purpose", PURPOSE_WEIGHT);
+}
+
 export function rankCandidates(
   candidates: Candidate[],
   options: {
@@ -246,13 +264,24 @@ export function rankCandidates(
      * `affinity.ts`.
      */
     taste?: TasteProfile | null;
+    /**
+     * The shopper's request, for matching against what each product says it is
+     * FOR. Omitted means that criterion is not scored at all.
+     */
+    queryText?: string | null;
   } = {},
 ): RankingResult {
   const priority = options.priority ?? "balanced";
   const base: Weights = { ...WEIGHT_PRESETS[priority], ...options.weights };
   const taste = options.taste ?? null;
   const personalise = taste != null && hasTaste(taste);
-  const weights: Weights = withAffinity(withFocus(base, options.focusQuality), personalise);
+  // Only when the caller passed the request text — there is nothing to compare
+  // a published purpose against otherwise.
+  const queryText = options.queryText?.trim() ?? "";
+  const weights: Weights = withPurpose(
+    withAffinity(withFocus(base, options.focusQuality), personalise),
+    queryText.length > 0,
+  );
 
   if (candidates.length === 0) {
     return { ranked: [], weights, priority, rejectedAlternatives: toRejectedAlternatives(options.rejected ?? []) };
@@ -423,6 +452,36 @@ export function rankCandidates(
           normalized: round(normalized),
           contribution: 0,
           note: reasons.length > 0 ? reasons.join("; ") : "nothing in your history points either way",
+        },
+      ]);
+    }
+
+    /*
+     * What the product says it is FOR.
+     *
+     * Relevance cannot separate a leather dress shoe from a leather sneaker —
+     * they are close in both embedding and keyword space — but the catalogue is
+     * not ambiguous: one says `use: "formal"`, the other says
+     * `useCase: "everyday wear and casual court style"`. Silence scores the
+     * neutral 0.5, so a merchant who left the field blank is never punished
+     * for it.
+     */
+    if (queryText) {
+      const { normalized, matched } = purposeMatch(queryText, candidate.attributes);
+      parts.push([
+        "purpose",
+        {
+          name: "what it is made for",
+          weight: weights.purpose ?? 0,
+          value: matched.length,
+          normalized: round(normalized),
+          contribution: 0,
+          note:
+            matched.length > 0
+              ? `listed for ${matched.slice(0, 3).join(", ")}`
+              : normalized === NEUTRAL_PURPOSE
+                ? "does not say what it is for"
+                : "listed for something else",
         },
       ]);
     }
