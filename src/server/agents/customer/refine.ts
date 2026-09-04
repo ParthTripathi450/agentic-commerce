@@ -71,6 +71,40 @@ const COMMON_COLOURS = [
   "burgundy", "maroon", "teal", "charcoal", "sage", "rust", "gold", "silver",
 ];
 
+/**
+ * Words that follow "in" without being a colour.
+ *
+ * Filler only. The list of COLOURS is the thing that must not be enumerated —
+ * §8.21 — because it fails for every shade nobody thought of; a shopper asking
+ * for chartreuse deserves "we do not have chartreuse", not silence.
+ */
+const NOT_A_COLOUR = new Set([
+  "stock", "store", "size", "sizes", "the", "and", "any", "all", "this", "that",
+  "your", "our", "their", "it", "them", "one", "two", "large", "small", "medium",
+  "wide", "narrow", "leather", "suede", "mesh", "cotton", "wool", "total",
+]);
+
+/**
+ * A colour recognised by the SHAPE of the sentence rather than by name.
+ *
+ * "do you have it in chartreuse", "is it available in volt colour". Catches
+ * shades the hardcoded list never will, which is the whole point: the refusal
+ * "we do not stock that" is only possible if the word survives extraction.
+ */
+function colourByShape(text: string): string | null {
+  const patterns = [
+    /\b([a-z]{3,15})\s+colou?r\b/i,
+    /\bcolou?r\s+([a-z]{3,15})\b/i,
+    /\b(?:in|into)\s+([a-z]{3,15})\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const found = pattern.exec(text)?.[1]?.toLowerCase();
+    if (found && !NOT_A_COLOUR.has(found)) return found;
+  }
+  return null;
+}
+
 /** Rule fallback: match their words against the options this product has. */
 function extractWithRules(
   message: string,
@@ -85,6 +119,7 @@ function extractWithRules(
     // Colours we do NOT stock still have to be recognised, or the shopper is
     // told nothing rather than "we don't have purple".
     COMMON_COLOURS.find((c) => new RegExp(`\\b${c}\\b`, "i").test(text)) ??
+    colourByShape(text) ??
     null;
   const size =
     sizes.find((s) => new RegExp(`\\b(?:size\\s*)?${escape(s)}\\b`, "i").test(text)) ??
@@ -166,7 +201,8 @@ export async function refineProduct(input: {
   const availableColors = distinct(product, "color");
   const availableSizes = distinct(product, "size");
 
-  let want = extractWithRules(input.message, product);
+  const byRules = extractWithRules(input.message, product);
+  let want = byRules;
   let degraded = true;
 
   try {
@@ -196,6 +232,28 @@ export async function refineProduct(input: {
   } catch {
     // Rules already produced a usable answer; keep it (§8.13).
   }
+
+  /*
+   * The rules are a SAFETY NET over the model, not merely a replacement for it.
+   *
+   * `want = value` used to discard the rule extraction wholesale, so a model
+   * that answered confidently but wrongly took the whole turn with it. That is
+   * what "is it available in volt colour" hit: the model returned
+   * `color: null`, the rules' correct reading of "volt" was thrown away, and
+   * the question fell through to a catch-all that recited price and stock —
+   * with nothing degraded and no error anywhere to show for it.
+   *
+   * Only NULLS are backfilled. A colour the model actually stated wins, because
+   * it read the sentence in context and can tell "not black, something else"
+   * from "black"; but silence from the model is not evidence that the shopper
+   * said nothing. Same shape as §8.8, where safety-relevant fields are
+   * rule-owned rather than left to whatever the model felt like returning.
+   */
+  want = {
+    ...want,
+    color: want.color ?? byRules.color,
+    size: want.size ?? byRules.size,
+  };
 
   const { variant, missing } = resolveVariant(product, current, want);
 
@@ -275,6 +333,25 @@ async function answerFromProduct(
   variant: ProductVariantView,
   question: string,
 ): Promise<{ reply: string; evidence: EvidenceChunk[] }> {
+  /*
+   * "What colours does it come in?" is the commonest question on a product
+   * page, and it was falling through to the catch-all: the reply recited price
+   * and stock while `availableColors` sat right there, computed and unused.
+   *
+   * The axes are read off the product's OWN variants rather than a list of
+   * things shoppers might ask about, so a catalogue that starts selling by
+   * width or length answers those too without a code change. That is the §8.21
+   * rule — a rule about the shape of the question, not an enumeration of the
+   * domain.
+   */
+  const options = answerAboutOptions(product, question);
+  if (options) return { reply: options, evidence: [] };
+
+  // Terms are the other question the catch-all was answering only by accident:
+  // it happened to mention returns while leading with price and stock.
+  const policy = answerAboutPolicy(product, question);
+  if (policy) return { reply: policy, evidence: [] };
+
   const qualities = (product.attributes as { qualities?: Record<string, number> }).qualities ?? {};
   /*
    * Matches a shared PREFIX in either direction.
@@ -347,4 +424,80 @@ async function answerFromProduct(
       `from ${product.merchant.name}.`,
     evidence: [],
   };
+}
+
+/** Words in the question, long enough to be meaningful. */
+function wordsOf(question: string): string[] {
+  return question.toLowerCase().match(/[a-z]{3,}/g) ?? [];
+}
+
+/**
+ * A shared four-character prefix, in either direction.
+ *
+ * The same trick the quality matcher uses, one character shorter because that
+ * is what "colour" and "color" need: they agree on "colo" and diverge at the
+ * fifth. It also carries plurals free — "sizes" reaches "size", "colours"
+ * reaches "color".
+ */
+function looselyMatches(word: string, target: string): boolean {
+  const a = word.slice(0, 4);
+  const b = target.slice(0, 4);
+  return a.length >= 3 && a === b;
+}
+
+/**
+ * Answers "what colours / sizes does it come in?" from the live variant axes.
+ *
+ * Only values that genuinely exist and are in stock, because this is a promise:
+ * naming a colour here means the shopper can go and buy it.
+ */
+function answerAboutOptions(product: ProductDetail, question: string): string | null {
+  const words = wordsOf(question);
+
+  const axes = new Map<string, Set<string>>();
+  for (const variant of product.variants) {
+    if (variant.availableQuantity <= 0) continue;
+    for (const [axis, value] of Object.entries(variant.attributes)) {
+      if (!value) continue;
+      (axes.get(axis) ?? axes.set(axis, new Set()).get(axis)!).add(value);
+    }
+  }
+
+  const asked = [...axes.keys()].find((axis) =>
+    words.some((word) => looselyMatches(word, axis.toLowerCase())),
+  );
+  if (!asked) return null;
+
+  const values = [...(axes.get(asked) ?? [])];
+  if (values.length === 0) return null;
+
+  const label = asked.toLowerCase() === "color" ? "colours" : `${asked.toLowerCase()}s`;
+  return `${product.title} comes in ${values.length} ${label}: ${values.join(", ")}. All in stock.`;
+}
+
+/**
+ * Answers a question about the terms rather than the product.
+ *
+ * Matched against the policy fields the merchant actually publishes, so this
+ * says what is true of THIS merchant rather than a general statement about
+ * returns — which is the only version worth showing beside a Buy button.
+ */
+function answerAboutPolicy(product: ProductDetail, question: string): string | null {
+  const words = wordsOf(question);
+  const { merchant } = product;
+
+  const mentions = (...targets: string[]) =>
+    words.some((word) => targets.some((t) => looselyMatches(word, t)));
+
+  if (mentions("return", "refund", "exchange")) {
+    return merchant.returnsAccepted
+      ? `${merchant.name} accepts returns within ${merchant.returnWindowDays} days of delivery.`
+      : `${merchant.name} does not accept returns on this item.`;
+  }
+
+  if (mentions("deliver", "shipping", "arrive", "dispatch", "posted")) {
+    return `${merchant.name} usually delivers in about ${merchant.standardDeliveryDays} days.`;
+  }
+
+  return null;
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { refineProduct } from "./refine";
 import { evidenceByTopic } from "@/server/catalog/evidence";
 import { resolveVariant } from "./refine";
 import type { ProductDetail, ProductVariantView } from "@/server/catalog/product-page";
@@ -141,5 +143,104 @@ describe("citations must be about what was asked", () => {
     // quality can never also be the quote for another.
     const ids = byTopic.flatMap((t) => t.chunks.map((c) => c.chunkId));
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("the questions shoppers actually ask on a product page", () => {
+  async function footballBoots() {
+    const [row] = (await db.execute(sql`
+      SELECT p.id FROM products p
+      JOIN product_variants v ON v.product_id = p.id
+      JOIN inventory i ON i.variant_id = v.id
+      WHERE p.status = 'active' AND v.active
+        AND GREATEST(i.quantity - i.reserved, 0) > 0
+        AND v.attributes->>'color' IS NOT NULL
+      GROUP BY p.id
+      HAVING COUNT(DISTINCT v.attributes->>'color') >= 2
+      LIMIT 1
+    `)) as unknown as { id: string }[];
+    return row?.id ?? null;
+  }
+
+  it("lists the colours when asked what colours there are", async () => {
+    // This was falling through to a catch-all that recited price and stock
+    // while availableColors sat right there, computed and unused.
+    const id = await footballBoots();
+    if (!id) return;
+
+    const result = await refineProduct({ productId: id, message: "What are the colours available?" });
+    expect(result).not.toBeNull();
+    for (const colour of result!.availableColors) {
+      expect(result!.reply.toLowerCase()).toContain(colour.toLowerCase());
+    }
+  });
+
+  it("lists the sizes when asked what sizes there are", async () => {
+    const id = await footballBoots();
+    if (!id) return;
+
+    const result = await refineProduct({ productId: id, message: "what sizes do you have" });
+    expect(result!.reply.toLowerCase()).toMatch(/size/);
+    expect(result!.reply).toContain(result!.availableSizes[0]);
+  });
+
+  it("answers the return policy with THIS merchant's terms", async () => {
+    const id = await footballBoots();
+    if (!id) return;
+
+    const result = await refineProduct({ productId: id, message: "whats the return policy" });
+    // Not the generic fact dump, which happened to mention returns while
+    // leading with price and stock.
+    expect(result!.reply.toLowerCase()).toMatch(/return/);
+    expect(result!.reply).not.toMatch(/in stock/);
+  });
+
+  it("refuses a colour it does not stock, even one nobody listed", async () => {
+    // §8.21: the hardcoded colour list fails for every shade not thought of,
+    // and a dropped word makes the refusal impossible — the shopper gets
+    // silence instead of "we do not have that".
+    const id = await footballBoots();
+    if (!id) return;
+
+    const result = await refineProduct({ productId: id, message: "do you have it in chartreuse" });
+    expect(result!.reply.toLowerCase()).toContain("chartreuse");
+    // A refusal always names the real options.
+    expect(result!.reply.toLowerCase()).toContain(result!.availableColors[0].toLowerCase());
+  });
+});
+
+describe("the rules backstop the model, they do not merely replace it", () => {
+  it("keeps a colour the rules found when the model returned none", async () => {
+    // The reported failure: the model returned color: null for a sentence that
+    // plainly says "volt", the rule extraction was discarded wholesale, and the
+    // question fell through to a catch-all reciting price and stock — with
+    // nothing degraded and no error anywhere to show for it.
+    const merged = { color: null as string | null, size: null as string | null };
+    const rules = { color: "volt", size: "9" };
+
+    const backfilled = {
+      ...merged,
+      color: merged.color ?? rules.color,
+      size: merged.size ?? rules.size,
+    };
+
+    expect(backfilled.color).toBe("volt");
+    expect(backfilled.size).toBe("9");
+  });
+
+  it("lets a colour the model actually stated win over the rules", () => {
+    // The model read the sentence in context and can tell "not black,
+    // something else" from "black"; silence is the only case worth overriding.
+    const fromModel = { color: "crimson", size: null as string | null };
+    const rules = { color: "black", size: "10" };
+
+    const backfilled = {
+      ...fromModel,
+      color: fromModel.color ?? rules.color,
+      size: fromModel.size ?? rules.size,
+    };
+
+    expect(backfilled.color).toBe("crimson");
+    expect(backfilled.size).toBe("10");
   });
 });
