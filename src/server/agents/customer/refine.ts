@@ -80,9 +80,20 @@ const COMMON_COLOURS = [
  * for chartreuse deserves "we do not have chartreuse", not silence.
  */
 const NOT_A_COLOUR = new Set([
-  "stock", "store", "size", "sizes", "the", "and", "any", "all", "this", "that",
-  "your", "our", "their", "it", "them", "one", "two", "large", "small", "medium",
-  "wide", "narrow", "leather", "suede", "mesh", "cotton", "wool", "total",
+  // Pronouns and determiners. "will my feet get hot in these" matched the
+  // "in <word>" shape and took "these" as a colour, so the agent refused a
+  // question about heat with "no colour these on this one" — a shape rule
+  // still needs to know that a colour is a content word.
+  "these", "those", "this", "that", "them", "they", "there", "here", "it",
+  "its", "the", "and", "any", "all", "your", "our", "their", "one", "two",
+  "some", "each", "both", "mine", "yours", "such", "what", "which",
+  // Things a shopper says "in" that are not colours.
+  "stock", "store", "size", "sizes", "total", "general", "fact", "person",
+  "stores", "shop", "time", "summer", "winter", "rain", "snow", "heat",
+  "large", "small", "medium", "wide", "narrow",
+  // Materials, which follow "in" constantly and are answered elsewhere.
+  "leather", "suede", "mesh", "cotton", "wool", "nylon", "canvas", "denim",
+  "linen", "silk", "rubber", "knit", "fleece",
 ]);
 
 /**

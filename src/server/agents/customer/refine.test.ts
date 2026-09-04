@@ -377,3 +377,40 @@ describe("answering from whatever the merchant published", () => {
     expect(result!.reply.toLowerCase()).toContain("colours and sizes");
   });
 });
+
+describe("a colour is a content word, not any word after 'in'", () => {
+  it("does not read a pronoun as a colour", async () => {
+    // "will my feet get hot in these" matched the "in <word>" shape and took
+    // "these" as a colour, so a question about heat was refused with
+    // "no colour these on this one".
+    const [row] = (await db.execute(sql`
+      SELECT p.id FROM products p
+      JOIN product_variants v ON v.product_id = p.id
+      WHERE p.status = 'active' AND v.attributes->>'color' IS NOT NULL
+      LIMIT 1
+    `)) as unknown as { id: string }[];
+    if (!row) return;
+
+    for (const question of [
+      "will my feet get hot in these",
+      "are these comfortable in summer",
+      "how do they hold up in the rain",
+    ]) {
+      const result = await refineProduct({ productId: row.id, message: question });
+      expect(result!.reply.toLowerCase(), question).not.toContain("no colour");
+    }
+  });
+
+  it("still hears a real colour, stocked or not", async () => {
+    const [row] = (await db.execute(sql`
+      SELECT p.id FROM products p
+      JOIN product_variants v ON v.product_id = p.id
+      WHERE p.status = 'active' AND v.attributes->>'color' IS NOT NULL
+      LIMIT 1
+    `)) as unknown as { id: string }[];
+    if (!row) return;
+
+    const refused = await refineProduct({ productId: row.id, message: "do you have it in chartreuse" });
+    expect(refused!.reply.toLowerCase()).toContain("chartreuse");
+  });
+});
