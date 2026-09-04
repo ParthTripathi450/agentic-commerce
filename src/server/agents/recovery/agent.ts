@@ -46,6 +46,8 @@ export type SweepResult = {
   escalated: number;
   stopped: number;
   recoveredMinor: number;
+  /** Left for the next sweep because this run hit its contact budget. */
+  deferred: number;
   cases: string[];
 };
 
@@ -64,7 +66,26 @@ async function limitsFor(merchantId: string): Promise<RecoveryLimits> {
     maxDiscountBp: l.maxRecoveryDiscountBp ?? DEFAULT_RECOVERY_LIMITS.maxDiscountBp,
     maxDiscountMinor: l.maxRecoveryDiscountMinor ?? DEFAULT_RECOVERY_LIMITS.maxDiscountMinor,
     minValueMinor: DEFAULT_RECOVERY_LIMITS.minValueMinor,
+    maxActionsPerSweep: l.maxRecoveryActionsPerSweep ?? 10,
+    maxContactsPerDay: l.maxRecoveryContactsPerDay ?? 25,
   };
+}
+
+/**
+ * How many shoppers this merchant has already contacted today.
+ *
+ * Counted from the cases themselves rather than a counter, so it stays true
+ * across restarts and cannot drift from what actually happened.
+ */
+async function contactsToday(merchantId: string): Promise<number> {
+  const [row] = (await db.execute(sql`
+    SELECT COUNT(DISTINCT user_id)::int AS n
+    FROM recovery_cases
+    WHERE merchant_id = ${merchantId}
+      AND message_count > 0
+      AND updated_at > now() - interval '24 hours'
+  `)) as unknown as { n: number }[];
+  return row?.n ?? 0;
 }
 
 function diagnoseFor(detected: DetectedCase): Diagnosis {
@@ -485,9 +506,29 @@ export async function runRecoverySweep(input: {
     )
     .limit(100);
 
-  const totals = { acted: 0, awaitingApproval: 0, escalated: 0, stopped: 0, recoveredMinor: 0 };
-  for (const item of live) {
+  /*
+   * The blast radius of ONE run.
+   *
+   * Per-case limits bound how persistent the agent is with one shopper; they do
+   * nothing about how many shoppers a single sweep reaches. Fifty cases each
+   * inside their own two-message allowance is still fifty people contacted at
+   * once — which is what happened in testing, twice, reaching 84 shoppers.
+   *
+   * Highest value first, so a bounded budget is spent where the money is rather
+   * than on whatever the query returned first.
+   */
+  const alreadyContacted = await contactsToday(input.merchantId);
+  let budget = Math.max(0, Math.min(limits.maxActionsPerSweep, limits.maxContactsPerDay - alreadyContacted));
+
+  const totals = { acted: 0, awaitingApproval: 0, escalated: 0, stopped: 0, recoveredMinor: 0, deferred: 0 };
+  for (const item of [...live].sort((a, b) => b.amountAtRiskMinor - a.amountAtRiskMinor)) {
+    if (budget <= 0) {
+      // Not dropped — left for the next sweep, with the risk still recorded.
+      totals.deferred++;
+      continue;
+    }
     const outcome = await advanceCase(item.id, limits, session.id);
+    if (outcome.acted || outcome.escalated) budget--;
     totals.acted += outcome.acted ? 1 : 0;
     totals.awaitingApproval += outcome.awaitingApproval ? 1 : 0;
     totals.escalated += outcome.escalated ? 1 : 0;
@@ -502,7 +543,10 @@ export async function runRecoverySweep(input: {
     observation: {
       summary:
         `Sweep complete: ${live.length} live case(s), ${formatMoney(atRisk)} at risk, ` +
-        `${formatMoney(totals.recoveredMinor)} verified recovered.`,
+        `${formatMoney(totals.recoveredMinor)} verified recovered` +
+        (totals.deferred > 0
+          ? `. ${totals.deferred} case(s) left for the next sweep — this run reached its contact budget.`
+          : "."),
     },
     reasoning: { summary: "One step per case per sweep, with every bound checked before acting." },
     action: { type: "recovery_sweep" },

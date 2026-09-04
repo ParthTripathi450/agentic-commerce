@@ -62,6 +62,8 @@ export const PLATFORM_DEFAULTS: PolicyLimits = {
   maxRecoveryDiscountBp: 1000,
   maxRecoveryDiscountMinor: 50_000,
   allowAutoRecovery: true,
+  maxRecoveryActionsPerSweep: 10,
+  maxRecoveryContactsPerDay: 25,
   // Bounded, but sized for a catalog that legitimately sells ₹12,000 items.
   // The meaningful guard is requireApprovalAboveMinor: 0 below — every payment
   // needs explicit consent — not an arbitrarily low ceiling.

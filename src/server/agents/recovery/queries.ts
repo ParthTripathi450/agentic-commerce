@@ -39,6 +39,56 @@ export async function listCases(merchantId: string, limit = 50): Promise<CaseRow
   })) as CaseRow[];
 }
 
+export type TimelineEntry = {
+  step: string;
+  summary: string;
+  reasoning: string;
+  detail: string;
+  status: string;
+  at: Date;
+};
+
+/**
+ * The audit trail for every case on the page, in ONE query.
+ *
+ * Per-case fetching meant fifty round trips to render a dashboard, and a
+ * timeline nobody waits for is a timeline nobody reads. Grouped by the
+ * `caseId` each event carries in its action params.
+ */
+export async function timelinesFor(
+  merchantId: string,
+): Promise<Map<string, TimelineEntry[]>> {
+  const rows = (await db.execute(sql`
+    SELECT ae.step, ae.observation, ae.reasoning, ae.action, ae.outcome, ae.created_at
+    FROM agent_events ae
+    WHERE ae.session_id IN (
+      SELECT DISTINCT session_id FROM recovery_cases
+      WHERE merchant_id = ${merchantId} AND session_id IS NOT NULL
+    )
+    ORDER BY ae.sequence ASC
+    LIMIT 800
+  `)) as unknown as Record<string, unknown>[];
+
+  const byCase = new Map<string, TimelineEntry[]>();
+  for (const r of rows) {
+    const action = r.action as { params?: { caseId?: string } };
+    const caseId = action?.params?.caseId;
+    // Sweep-level entries belong to no single case and are shown on none.
+    if (!caseId) continue;
+
+    const entry: TimelineEntry = {
+      step: String(r.step),
+      summary: String((r.observation as { summary?: string })?.summary ?? ""),
+      reasoning: String((r.reasoning as { summary?: string })?.summary ?? ""),
+      detail: String((r.outcome as { detail?: string })?.detail ?? ""),
+      status: String((r.outcome as { status?: string })?.status ?? "ok"),
+      at: new Date(String(r.created_at)),
+    };
+    byCase.set(caseId, [...(byCase.get(caseId) ?? []), entry]);
+  }
+  return byCase;
+}
+
 /**
  * The audit trail for one case, oldest first.
  *

@@ -245,3 +245,29 @@ describe("what the shopper reads is true", () => {
     expect(body).not.toMatch(/₹[\d,]+\s*off/);
   });
 });
+
+describe("the sweep itself is bounded, not only each case", () => {
+  it("carries a per-sweep and per-day cap in the defaults", () => {
+    /*
+     * The bug this exists for: per-case limits bound how PERSISTENT the agent
+     * is with one shopper and say nothing about how many shoppers one run
+     * reaches. Fifty cases each inside their own two-message allowance is still
+     * fifty people contacted at once — which happened in testing, twice,
+     * reaching 84 shoppers before anyone noticed.
+     */
+    expect(DEFAULT_RECOVERY_LIMITS.maxActionsPerSweep).toBeGreaterThan(0);
+    expect(DEFAULT_RECOVERY_LIMITS.maxContactsPerDay).toBeGreaterThan(0);
+    // A single run must never be able to spend the whole day's allowance.
+    expect(DEFAULT_RECOVERY_LIMITS.maxActionsPerSweep).toBeLessThan(
+      DEFAULT_RECOVERY_LIMITS.maxContactsPerDay,
+    );
+  });
+
+  it("keeps per-case limits independent of the sweep budget", () => {
+    // Raising the blast radius must not raise how hard any one shopper is
+    // pushed, and vice versa.
+    const generous = { ...DEFAULT_RECOVERY_LIMITS, maxActionsPerSweep: 500, maxContactsPerDay: 500 };
+    const d = determineAction(caseState({ messageCount: 2, retryCount: 2 }), generous);
+    expect(d.action).toBe("stop");
+  });
+});

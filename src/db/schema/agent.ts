@@ -159,6 +159,18 @@ export type PolicyLimits = {
    * a cautious merchant to run this, not a degraded mode.
    */
   allowAutoRecovery?: boolean;
+  /**
+   * Cases one sweep may ACT on, however many it detected.
+   *
+   * Per-case limits do not bound a sweep: each of fifty cases can be within its
+   * own two-message allowance while the merchant contacts fifty different
+   * people in one second. Seen for real in testing — two button presses reached
+   * 84 shoppers. The blast radius of a single run has to be capped separately
+   * from the persistence of any one case.
+   */
+  maxRecoveryActionsPerSweep?: number;
+  /** Shoppers this merchant may contact about recovery in a rolling day. */
+  maxRecoveryContactsPerDay?: number;
 };
 
 export const agentPolicies = pgTable("agent_policies", {

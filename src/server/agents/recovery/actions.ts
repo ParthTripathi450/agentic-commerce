@@ -22,7 +22,10 @@ export async function runSweepAction() {
     ok: true as const,
     message:
       `${result.detected} new case(s) detected. ` +
-      `${result.acted} contacted, ${result.escalated} escalated, ${result.stopped} stopped.`,
+      `${result.acted} contacted, ${result.escalated} escalated, ${result.stopped} stopped` +
+      (result.deferred > 0
+        ? `. ${result.deferred} left for the next sweep — this run reached its contact budget.`
+        : "."),
   };
 }
 

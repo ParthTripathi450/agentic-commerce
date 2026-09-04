@@ -22,6 +22,15 @@ export type BoardCase = {
   shopperEmail: string;
   summary: string | null;
   basis: string[];
+  /** Every step the agent took on this case, oldest first. */
+  timeline: {
+    step: string;
+    summary: string;
+    reasoning: string;
+    detail: string;
+    status: string;
+    at: string;
+  }[];
 };
 
 export type BoardMetrics = {
@@ -223,6 +232,15 @@ export function RecoveryBoard({
                   </div>
                 ) : null}
 
+                {/*
+                  * The audit trail, in the agent's own steps.
+                  *
+                  * Collapsed because most of the time the verdict is enough —
+                  * but one click away, because the moment a merchant disagrees
+                  * with a decision this is the only thing that settles it.
+                  */}
+                {item.timeline.length > 0 ? <Timeline entries={item.timeline} /> : null}
+
                 {!["recovered", "stopped", "escalated", "expired"].includes(item.state) ? (
                   <button
                     type="button"
@@ -238,6 +256,68 @@ export function RecoveryBoard({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+const STEP_TONE: Record<string, string> = {
+  DETECT: "text-muted-foreground",
+  DIAGNOSE: "text-primary",
+  RECOMMEND: "text-primary",
+  POLICY_CHECK: "text-warning",
+  EXECUTE: "text-foreground",
+  VERIFY: "text-success",
+};
+
+function Timeline({ entries }: { entries: BoardCase["timeline"] }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="border-t border-border pt-2.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="text-xs text-primary underline underline-offset-4 hover:text-primary/80"
+      >
+        {open ? "Hide" : `Audit trail (${entries.length} step${entries.length === 1 ? "" : "s"})`}
+      </button>
+
+      {open ? (
+        <ol className="mt-2 space-y-2">
+          {entries.map((e, i) => (
+            <li key={i} className="border-l-2 border-border pl-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span
+                  className={cn(
+                    "font-mono text-[11px] font-semibold tracking-wide",
+                    STEP_TONE[e.step] ?? "text-muted-foreground",
+                  )}
+                >
+                  {e.step}
+                </span>
+                <span className="text-[11px] text-subtle">
+                  {new Date(e.at).toLocaleString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+                {e.status !== "ok" ? <Badge tone="warning">{e.status}</Badge> : null}
+              </div>
+              {e.summary ? <p className="mt-0.5 text-xs">{e.summary}</p> : null}
+              {/* Why, not just what — the part an approval rests on. */}
+              {e.reasoning ? (
+                <p className="mt-0.5 text-xs text-muted-foreground">{e.reasoning}</p>
+              ) : null}
+              {e.detail && e.detail !== e.summary ? (
+                <p className="mt-0.5 font-mono text-[11px] text-subtle">{e.detail}</p>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { RecoveryBoard, type BoardCase } from "@/components/merchant/recovery-board";
 import { requireMerchant } from "@/lib/session";
 import { recoveryMetrics } from "@/server/agents/recovery/agent";
-import { listCases } from "@/server/agents/recovery/queries";
+import { listCases, timelinesFor } from "@/server/agents/recovery/queries";
 
 /**
  * Revenue recovery, for the merchant.
@@ -14,9 +14,10 @@ import { listCases } from "@/server/agents/recovery/queries";
  */
 export default async function RecoveryPage() {
   const { merchant } = await requireMerchant();
-  const [metrics, cases] = await Promise.all([
+  const [metrics, cases, timelines] = await Promise.all([
     recoveryMetrics(merchant.id),
     listCases(merchant.id),
+    timelinesFor(merchant.id),
   ]);
 
   const board: BoardCase[] = cases.map((c) => {
@@ -37,6 +38,7 @@ export default async function RecoveryPage() {
       shopperEmail: c.shopperEmail,
       summary: diagnosis?.summary ?? null,
       basis: diagnosis?.basis ?? [],
+      timeline: (timelines.get(c.id) ?? []).map((e) => ({ ...e, at: e.at.toISOString() })),
     };
   });
 

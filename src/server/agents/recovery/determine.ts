@@ -50,6 +50,10 @@ export type RecoveryLimits = {
   maxDiscountMinor: number;
   /** Below this, the case is not worth an intervention at all. */
   minValueMinor: number;
+  /** Cases one sweep may act on, however many are waiting. */
+  maxActionsPerSweep: number;
+  /** Shoppers this merchant may contact in a rolling day. */
+  maxContactsPerDay: number;
 };
 
 export const DEFAULT_RECOVERY_LIMITS: RecoveryLimits = {
@@ -58,6 +62,8 @@ export const DEFAULT_RECOVERY_LIMITS: RecoveryLimits = {
   maxDiscountBp: 1000,
   maxDiscountMinor: 50_000,
   minValueMinor: 20_000,
+  maxActionsPerSweep: 10,
+  maxContactsPerDay: 25,
 };
 
 export type CaseState = {

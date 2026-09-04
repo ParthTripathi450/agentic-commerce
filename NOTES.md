@@ -756,6 +756,14 @@ Rules that carry the feature:
   `promotions` row with a usable code. There is no stored credential, so "retry" means a link back
   to the same basket, never a silent re-charge.
 
+**Per-case limits do not bound a sweep, and assuming they did was the worst bug in this feature.**
+Each of fifty cases can sit inside its own two-message allowance while a single run contacts fifty
+different people — which is exactly what happened in testing: two button presses reached **84
+shoppers**. `maxRecoveryActionsPerSweep` (10) caps one run and `maxRecoveryContactsPerDay` (25) caps
+the day, cases are worked highest-value first so a bounded budget is spent where the money is, and
+anything over budget is DEFERRED to the next sweep rather than dropped. Persistence with one shopper
+and blast radius across many are different quantities and need different limits.
+
 **Idempotence is the property the numbers depend on**, and the first version got it wrong: the
 unique index and the detection queries excluded only OPEN cases, so an escalated case stopped
 colliding and the next sweep re-detected it. Three passes produced 13 cases for 5 risks and 12
