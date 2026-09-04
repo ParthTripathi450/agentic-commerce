@@ -83,6 +83,14 @@ export type TurnDto = {
   narrative: string | null;
   /** Short scannable reasons, generated from the score vector. */
   points: string[];
+  /**
+   * What buyers said about the pick, quoted verbatim.
+   *
+   * Carried separately from `points` because they come from a different place
+   * and carry a different kind of authority: the points are the ranking
+   * narrated, these are people. No model wrote or rewrote them.
+   */
+  evidence: Array<{ body: string; ratingBp: number | null }>;
   intent: {
     productQuery: string;
     category: string | null;
@@ -178,6 +186,8 @@ export function toTurnDto(turn: ShoppingTurn): TurnDto {
     known: turn.known,
     narrative: turn.explanation?.narrative ?? null,
     points: turn.explanation?.points ?? [],
+    evidence:
+      turn.explanation?.evidence.map((e) => ({ body: e.body, ratingBp: e.ratingBp })) ?? [],
     intent: {
       productQuery: turn.intent.productQuery,
       category: turn.intent.category,

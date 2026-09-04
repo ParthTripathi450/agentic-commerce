@@ -181,6 +181,21 @@ Returns `points: string[]` (3–5 short bullets), not prose. The model sees **on
 criteria as human-readable phrases — never raw scores or weights. A test asserts no point ever
 contains a decimal like `0.9957`.
 
+**It also carries what buyers said about the pick, and the model never touches that text.** The
+obvious way to use retrieved reviews is to hand the sentences over and ask for a summary; it is the
+wrong way. This model's one guarantee is that it adds no facts, and a paraphrase of a review is a
+new claim attributed to a real person who did not make it — a different and worse class of error
+than a clumsy score narration. So `retrieveEvidence` runs in code, scoped to the winning product and
+asked with the shopper's OWN phrasing (reviews are prose, and a shopper's sentence retrieves against
+prose better than a criterion name), and the quotes ride on `Explanation.evidence` to be rendered
+verbatim beside the points. The model narrates the ranking; the buyers speak for themselves. A test
+asserts every quoted body matches a stored chunk byte for byte.
+
+The contrast is the point: the model produces *"rated 4.6/5 from 11 customer reviews"*; the corpus
+produces *"No slipping at all, even on polished floors."* One is a statistic, the other is a reason.
+Evidence is an improvement to an explanation, never a precondition for one — a product with no
+reviews still gets its reasons.
+
 ### Policy engine (`server/policy/engine.ts`)
 `evaluatePolicy(action, ctx) -> { verdict, reason, boundsChecked, violations, limits }`.
 Called before every money-moving or catalog-mutating action.
@@ -391,7 +406,10 @@ it is for). Two decisions that were measured, not guessed:
   pinned trade-off at 0.438. If the constraint is too tight, the relaxation path drops it and says
   so — the honest way to widen.
 
-**The retrieval layer is `server/catalog/evidence.ts`, and it is wired into three places:** the
+**The retrieval layer is `server/catalog/evidence.ts`, and it is wired into four places:** the
+agent's own explanation (`explain.ts` — buyer quotes beside the ranking's reasons, on `/shop` and on
+the autonomous flow's authorisation screen, which is the one screen a shopper reads before money
+moves), the
 product page (`evidenceByTopic` — the qualities a category is rated on become the questions asked of
 the corpus, so each score is shown WITH the sentence that evidences it), the product chat
 (`refine.ts` answers "will my feet get hot?" by quoting a buyer instead of reciting `breathability:

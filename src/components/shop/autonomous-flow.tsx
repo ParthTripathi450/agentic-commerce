@@ -760,6 +760,35 @@ function AuthorizationScreen({
                 </li>
               ))}
             </ul>
+
+            {/*
+              * Buyers, in their own words, on the screen where money is
+              * authorised.
+              *
+              * Kept visually apart from the reasons above because it is a
+              * different kind of claim. Everything above is the agent
+              * explaining itself; this is people who bought the thing, quoted
+              * exactly, with no model between them and the reader.
+              */}
+            {outcome.evidence.length > 0 ? (
+              <div className="mt-4 border-t border-border pt-3">
+                <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  What buyers said
+                </p>
+                <div className="space-y-2">
+                  {outcome.evidence.map((quote, index) => (
+                    <blockquote key={index} className="border-l-2 border-border pl-3">
+                      <p className="text-sm leading-relaxed">&ldquo;{quote.body}&rdquo;</p>
+                      {quote.ratingBp ? (
+                        <div className="mt-1">
+                          <StarDisplay stars={quote.ratingBp / 1000} />
+                        </div>
+                      ) : null}
+                    </blockquote>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </CardBody>
         </Card>
 

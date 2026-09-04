@@ -365,7 +365,9 @@ function TurnView({ turn, onReorder }: { turn: TurnDto; onReorder: (order: strin
         />
       ) : null}
 
-      {turn.points.length > 0 ? <ReasonsPanel points={turn.points} /> : null}
+      {turn.points.length > 0 ? (
+        <ReasonsPanel points={turn.points} evidence={turn.evidence} />
+      ) : null}
 
       {justAdded ? (
         <AlsoLike productId={justAdded.productId} title={justAdded.title} />
@@ -425,7 +427,13 @@ function TurnView({ turn, onReorder }: { turn: TurnDto; onReorder: (order: strin
  * Closed by default so the results are what you see first; the reasons are one
  * click away when you want to check the agent's work.
  */
-function ReasonsPanel({ points }: { points: string[] }) {
+function ReasonsPanel({
+  points,
+  evidence,
+}: {
+  points: string[];
+  evidence: TurnDto["evidence"];
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -460,6 +468,35 @@ function ReasonsPanel({ points }: { points: string[] }) {
                 <span className="leading-relaxed">{point}</span>
               </li>
             ))}
+
+            {/*
+              * Buyers, quoted verbatim.
+              *
+              * Visually separated from the points above because they carry a
+              * different kind of authority: the points are this ranking
+              * narrated back, these are people who bought the thing. Nothing
+              * here was written or rewritten by a model, which is exactly why
+              * it is worth reading.
+              */}
+            {evidence.length > 0 ? (
+              <li className="mt-1 border-t border-border pt-3">
+                <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  What buyers said
+                </p>
+                <div className="space-y-2">
+                  {evidence.map((quote, index) => (
+                    <blockquote key={index} className="border-l-2 border-border pl-3">
+                      <p className="text-sm leading-relaxed">&ldquo;{quote.body}&rdquo;</p>
+                      {quote.ratingBp ? (
+                        <div className="mt-1">
+                          <StarDisplay stars={quote.ratingBp / 1000} />
+                        </div>
+                      ) : null}
+                    </blockquote>
+                  ))}
+                </div>
+              </li>
+            ) : null}
           </ul>
         ) : null}
       </CardBody>

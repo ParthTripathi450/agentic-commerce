@@ -36,6 +36,15 @@ export type AutonomousOutcome =
         deltas: string[];
       }>;
       reasons: string[];
+      /**
+       * What buyers said about the pick, quoted verbatim.
+       *
+       * Weighs more here than anywhere: this flow spends money on the
+       * shopper's behalf, so the one screen they read before authorising it
+       * should carry evidence written by people rather than only the agent's
+       * account of its own reasoning.
+       */
+      evidence: Array<{ body: string; ratingBp: number | null }>;
       excluded: Array<{ label: string; reason: string }>;
       totals: {
         subtotalMinor: number;
@@ -207,6 +216,7 @@ export async function runAutonomousPurchase(input: {
     selected,
     alternatives,
     reasons: dto.points,
+    evidence: dto.evidence,
     excluded: dto.excluded.slice(0, 4),
     totals: proposal.totals,
     merchantName: proposal.cart.merchant.name,

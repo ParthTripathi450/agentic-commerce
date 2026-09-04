@@ -5,15 +5,29 @@ import { z } from "zod";
 import { completeJson, type LlmResult } from "@/server/ai/llm";
 import { compareToWinner, type RankedCandidate, type Weights } from "./ranker";
 import type { ShoppingIntent } from "./intent-schema";
+import { retrieveEvidence, type EvidenceChunk } from "@/server/catalog/evidence";
 
 /**
- * EXPLAIN: turns the ranking's score vector into prose.
+ * EXPLAIN: turns the ranking's score vector into prose, and attaches what
+ * buyers said about the winner.
  *
  * The model receives ONLY the computed criteria, weights and factual deltas —
  * never the raw catalog — and is instructed to add no facts of its own. So the
  * stated reasons are always the reasons that actually produced the ranking, and
  * the deterministic template below says the same thing in plainer words when no
  * model is available.
+ *
+ * **Retrieved reviews are deliberately kept OUT of the prompt.** The obvious
+ * way to use them is to hand the sentences over and ask for a summary, and it
+ * is the wrong way: the model's one guarantee here is that it adds no facts,
+ * and a paraphrase of a review is a new claim attributed to a real person who
+ * did not make it. Getting a score narration slightly wrong is a poor
+ * explanation; putting words in a named buyer's mouth is a different kind of
+ * error entirely.
+ *
+ * So the quotes are retrieved by code, carried on the Explanation, and rendered
+ * verbatim beside the points. The model narrates the ranking; the buyers speak
+ * for themselves.
  */
 
 export type Comparison = {
@@ -39,6 +53,13 @@ export type Explanation = {
   topFactors: Criterion[];
   comparisons: Comparison[];
   excluded: RejectedAlternative[];
+  /**
+   * Real review sentences about the chosen product, quoted verbatim.
+   *
+   * Retrieved, never written. The model is not shown these and never
+   * reproduces them — see the note on `explainSelection`.
+   */
+  evidence: EvidenceChunk[];
   meta: LlmResult;
 };
 
@@ -181,6 +202,22 @@ export async function explainSelection(options: {
   const { intent, ranked, excluded } = options;
   const winner = ranked[0];
 
+  /*
+   * What buyers said about the winner, in their own words.
+   *
+   * Scoped to this product and asked using the shopper's OWN phrasing, because
+   * reviews are prose and a shopper's sentence retrieves against prose far
+   * better than a criterion name does. Best-effort: an explanation without
+   * quotes is a worse explanation, never a broken turn.
+   */
+  const evidence = winner
+    ? await retrieveEvidence({
+        question: intent.productQuery,
+        productIds: [winner.candidate.productId],
+        limit: 2,
+      }).catch(() => [] as EvidenceChunk[])
+    : [];
+
   const comparisons: Comparison[] = ranked.slice(1, 4).map((other) => {
     const diff = compareToWinner(winner, other);
     return {
@@ -275,6 +312,7 @@ export async function explainSelection(options: {
     topFactors: topFactorsOf(winner.criteria),
     comparisons,
     excluded,
+    evidence,
     meta,
   };
 }
