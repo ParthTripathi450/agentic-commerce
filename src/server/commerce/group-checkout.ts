@@ -233,6 +233,14 @@ export async function authorizeGroupCheckout(input: {
   approvalIds: string[];
   decision: "approve" | "reject";
   note?: string;
+  /**
+   * One address for the whole group.
+   *
+   * Every order in a group checkout goes to the same doorstep — that is what
+   * makes it one delivery decision even though it is several merchants — so it
+   * is chosen once and snapshotted onto each order.
+   */
+  addressId?: string | null;
 }): Promise<GroupAuthorizeResult> {
   const [group] = await db
     .select()
@@ -269,6 +277,7 @@ export async function authorizeGroupCheckout(input: {
       note: input.note,
       deferPayment: true,
       checkoutGroupId: group.id,
+      addressId: input.addressId ?? null,
     });
 
     if (result.status !== "order_created") {

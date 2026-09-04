@@ -678,6 +678,32 @@ shoes). **`similarTo`** is nearest-neighbour on the same pgvector embeddings sea
 "similar" means the same thing everywhere. Both require live stock; both dedupe by title, because a
 product stocked by several merchants otherwise fills every slot with itself.
 
+### Delivery addresses (`server/commerce/addresses.ts`)
+A shopper legitimately has several — home, office, a parent's house — so they live in their own
+table rather than on `users`. **Orders do NOT reference that table.** They carry a snapshot in
+`orders.shippingAddress`, for the same reason `order_items` snapshots the title and SKU: an order is
+a record of what happened, and it has to keep saying where it went after the shopper edits that
+address or deletes it. A foreign key would let a delivered order rewrite its own history.
+
+Two rules that exist because breaking them looks like data loss rather than a mistake: the FIRST
+address is always the default whatever the caller asked (a shopper whose only address is non-default
+gets a checkout offering nothing), and deleting the default promotes another in the same
+transaction. Collected at sign-up as optional-but-all-or-nothing — a half-entered address is worse
+than none, because checkout would offer it and then fail on the missing postcode.
+
+`npm run db:backfill-addresses` is idempotent and covers everything that predates the feature.
+
+### Refunds from either side (`server/commerce/refund-writer.ts`)
+A refund moves real money, restocks inventory and writes an audit record, and there are two ways to
+start one. **`executeRefund` is the only place it actually happens** — two code paths would be two
+chances to get the gateway wrong, and §8.15 records what that costs.
+
+The two callers differ only in what they check first. A merchant may refund an order at any age,
+because that is their business. A shopper may refund inside the seller's published returns window,
+and `withinReturnWindow()` decides — a policy you must ask permission to use is a suggestion, not a
+policy, and this marketplace ranks sellers on that window as though it were a fact. Refusals state
+the numbers, because the shopper can read the same policy on the product page.
+
 ### Cart ownership
 `carts.agentSessionId` distinguishes a basket the AGENT assembled from one the shopper built, and
 that distinction is load-bearing: on a declined payment the agent's basket is discarded

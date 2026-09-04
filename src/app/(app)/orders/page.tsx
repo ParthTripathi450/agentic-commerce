@@ -6,8 +6,10 @@ import { ReviewControl } from "@/components/reviews/review-form";
 import { MerchantReviewControl } from "@/components/reviews/merchant-review";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { db } from "@/db";
-import { merchants, orderItems, orders, payments, productReviews, productVariants } from "@/db/schema";
+import { merchantPolicies, merchants, orderItems, orders, payments, productReviews, productVariants } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
+import { RefundRequest } from "@/components/cart/refund-request";
+import { formatAddress } from "@/server/commerce/addresses";
 import { requireCustomer } from "@/lib/session";
 import { getMerchantRatings, getMerchantReviewsByOrder } from "@/server/reviews/queries";
 
@@ -30,10 +32,13 @@ export default async function OrdersPage() {
       merchantId: merchants.id,
       paymentState: payments.state,
       failureReason: payments.failureReason,
+      returnWindowDays: merchantPolicies.returnWindowDays,
+      returnsAccepted: merchantPolicies.returnsAccepted,
     })
     .from(orders)
     .innerJoin(merchants, eq(merchants.id, orders.merchantId))
     .leftJoin(payments, eq(payments.orderId, orders.id))
+    .leftJoin(merchantPolicies, eq(merchantPolicies.merchantId, orders.merchantId))
     .where(eq(orders.userId, user.id))
     .orderBy(desc(orders.createdAt))
     .limit(30);
@@ -96,10 +101,24 @@ export default async function OrdersPage() {
             </p>
           ) : null}
 
-          {rows.map(({ order, merchantName, paymentState, failureReason }) => {
+          {rows.map(({ order, merchantName, paymentState, failureReason, returnWindowDays, returnsAccepted }) => {
             const state = STATE[order.state] ?? { tone: "neutral" as Tone, label: order.state };
             const lines = itemsByOrder.get(order.id) ?? [];
             const canReview = order.state === "paid" || order.state === "fulfilled";
+
+            /*
+             * The returns window, computed here so the control only appears
+             * while it is genuinely open. A button that shows and then refuses
+             * is worse than none — the shopper has decided by the time they
+             * are told no.
+             */
+            const windowDays = returnWindowDays ?? 7;
+            const elapsed = Math.floor((Date.now() - order.createdAt.getTime()) / 86_400_000);
+            const refundable =
+              (returnsAccepted ?? true) &&
+              paymentState === "captured" &&
+              (order.state === "paid" || order.state === "fulfilled") &&
+              elapsed <= windowDays;
 
             return (
               <Card key={order.id}>
@@ -136,6 +155,12 @@ export default async function OrdersPage() {
                       </p>
                     </div>
                   </div>
+
+                  {order.shippingAddress ? (
+                    <p className="text-xs text-subtle">
+                      Delivered to {formatAddress(order.shippingAddress)}
+                    </p>
+                  ) : null}
 
                   <ul className="space-y-3 border-t border-border pt-3">
                     {lines.map(({ item, productId }) => {
@@ -193,6 +218,10 @@ export default async function OrdersPage() {
                   ) : null}
                   {paymentState === "captured" ? (
                     <p className="text-xs text-subtle">Paid via Razorpay test mode.</p>
+                  ) : null}
+
+                  {refundable ? (
+                    <RefundRequest orderId={order.id} daysLeft={windowDays - elapsed} />
                   ) : null}
                 </CardBody>
               </Card>

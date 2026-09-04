@@ -11,6 +11,8 @@ const schema = z.object({
   approvalIds: z.array(z.string().min(1)).min(1).max(20),
   decision: z.enum(["approve", "reject"]),
   note: z.string().max(500).optional(),
+  /** One address for every order in the group. Omitted means their default. */
+  addressId: z.string().max(36).nullish(),
 });
 
 export async function POST(request: Request) {

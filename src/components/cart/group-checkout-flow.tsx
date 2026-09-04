@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, ShieldCheck, User, X } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
+import { AddressPicker, type PickableAddress } from "./address-picker";
 import { formatMoney } from "@/lib/money";
 
 /**
@@ -62,9 +63,25 @@ type Phase =
   | { name: "paid"; orderNumbers: string[]; steps: Step[] }
   | { name: "failed"; reason: string; steps?: Step[] };
 
-export function GroupCheckoutFlow({ savedMethod }: { savedMethod: string | null }) {
+export function GroupCheckoutFlow({
+  savedMethod,
+  addresses,
+}: {
+  savedMethod: string | null;
+  addresses: PickableAddress[];
+}) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ name: "preparing" });
+  /*
+   * One address for the whole group.
+   *
+   * Every order here ships to the same doorstep — that is what makes it one
+   * delivery decision even though it is several merchants — so it is chosen
+   * once, pre-set to their usual, rather than asked per merchant.
+   */
+  const [addressId, setAddressId] = useState<string | null>(
+    addresses.find((a) => a.isDefault)?.id ?? addresses[0]?.id ?? null,
+  );
 
   const prepare = useCallback(async () => {
     setPhase({ name: "preparing" });
@@ -96,6 +113,7 @@ export function GroupCheckoutFlow({ savedMethod }: { savedMethod: string | null 
           groupId: proposal.groupId,
           approvalIds: proposal.lines.map((l) => l.proposal.approvalId),
           decision: "approve",
+          addressId,
         }),
       })
     ).json();
@@ -308,6 +326,8 @@ export function GroupCheckoutFlow({ savedMethod }: { savedMethod: string | null 
               </li>
             ))}
           </ul>
+
+          <AddressPicker addresses={addresses} selectedId={addressId} onSelect={setAddressId} />
 
           {multi ? (
             <p className="text-xs text-muted-foreground">

@@ -1,13 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { inventory, orderItems, orders, payments } from "@/db/schema";
+import { inventory, orderItems, orders } from "@/db/schema";
 import { record, startSession } from "@/server/audit/recorder";
-import { gatewayByName } from "@/server/commerce/gateway";
-import { evaluateRefund } from "@/server/commerce/refund";
-import { formatMoney } from "@/lib/money";
+import { executeRefund } from "@/server/commerce/refund-writer";
 import { requireMerchant } from "@/lib/session";
 
 /**
@@ -114,83 +112,20 @@ export async function refundOrderAction(orderId: string, reason?: string): Promi
   const order = await loadOwnedOrder(orderId, merchant.id);
   if (!order) return { error: "That order is not yours." };
 
-  // Most recent first: a retried charge leaves earlier failed rows behind.
-  const [payment] = await db
-    .select()
-    .from(payments)
-    .where(eq(payments.orderId, order.id))
-    .orderBy(desc(payments.createdAt))
-    .limit(1);
-
-  const eligibility = evaluateRefund({
-    orderState: order.state,
-    paymentState: payment?.state ?? null,
-    paymentAmountMinor: payment?.amountMinor ?? null,
-    gatewayPaymentId: payment?.gatewayPaymentId ?? null,
+  // Ownership established; the money is moved by the single writer both this
+  // and the shopper's own request go through.
+  const result = await executeRefund({
+    orderId: order.id,
+    actorUserId: user.id,
+    actorLabel: "the seller",
+    reason,
   });
-  if (!eligibility.ok) return { error: eligibility.error };
+  if (!result.ok) return { error: result.error };
 
-  const { amountMinor, gatewayPaymentId, restock, stockNote } = eligibility.plan;
-
-  // Refund on the rails the charge came in on, not on the configured default.
-  const gateway = gatewayByName(payment.gateway);
-  let refund;
-  try {
-    refund = await gateway.refundPayment({
-      gatewayPaymentId,
-      amountMinor,
-      notes: { order: order.orderNumber, merchant: merchant.id },
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "gateway rejected the refund";
-    await audit(order, user.id, "refund_order", `Refund of ${order.orderNumber} failed: ${detail}`);
-    return { error: `The gateway refused the refund: ${detail}` };
-  }
-
-  if (refund.status === "failed") {
-    await audit(order, user.id, "refund_order", `Gateway reported the refund of ${order.orderNumber} as failed.`);
-    return { error: "The gateway reported the refund as failed. Nothing was returned." };
-  }
-
-  await db
-    .update(payments)
-    .set({
-      state: "refunded",
-      raw: { ...(payment.raw ?? {}), refund: refund.raw },
-      updatedAt: new Date(),
-    })
-    .where(eq(payments.id, payment.id));
-
-  await db
-    .update(orders)
-    .set({ state: "refunded", updatedAt: new Date() })
-    .where(eq(orders.id, order.id));
-
-  if (restock) {
-    const lines = await db
-      .select({ variantId: orderItems.variantId, quantity: orderItems.quantity })
-      .from(orderItems)
-      .where(eq(orderItems.orderId, order.id));
-
-    for (const line of lines) {
-      await db
-        .update(inventory)
-        .set({ quantity: sql`${inventory.quantity} + ${line.quantity}`, updatedAt: new Date() })
-        .where(eq(inventory.variantId, line.variantId));
-    }
-  }
-
-  const settled = refund.status === "pending" ? "is on its way back" : "returned";
-  const detail =
-    `${formatMoney(amountMinor, payment.currency)} ${settled} to the customer for ` +
-    `${order.orderNumber} via ${payment.gateway} (${refund.gatewayRefundId}); ${stockNote}.` +
-    (reason ? ` Reason: ${reason}` : "");
-
-  await audit(order, user.id, "refund_order", detail);
   revalidatePath("/merchant/orders");
   revalidatePath("/merchant");
   revalidatePath("/orders");
-  return { ok: true, message: detail };
+  return { ok: true, message: result.message };
 }
 
 async function audit(

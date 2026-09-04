@@ -109,3 +109,39 @@ export function evaluateRefund(input: RefundInput): RefundEligibility {
     },
   };
 }
+
+/**
+ * Is this order still inside the merchant's own returns window?
+ *
+ * The shopper-facing rule, and deliberately separate from `evaluateRefund`:
+ * that answers "can this payment be returned at all", which is about the money
+ * and is the same for everybody. This answers "is this shopper still entitled
+ * to ask", which is the merchant's published policy and applies only to them —
+ * a merchant refunding a year-old order out of goodwill is their business.
+ *
+ * Measured from when the order was PLACED. Delivery dates are not recorded, and
+ * inventing one to be strict about would make the answer unverifiable by the
+ * shopper reading the same policy.
+ */
+export function withinReturnWindow(input: {
+  placedAt: Date;
+  returnsAccepted: boolean;
+  returnWindowDays: number;
+  now?: Date;
+}): { ok: true } | { ok: false; reason: string } {
+  if (!input.returnsAccepted) {
+    return { ok: false, reason: "This seller does not accept returns on any order." };
+  }
+
+  const now = input.now ?? new Date();
+  const elapsedDays = Math.floor((now.getTime() - input.placedAt.getTime()) / 86_400_000);
+  if (elapsedDays > input.returnWindowDays) {
+    return {
+      ok: false,
+      reason:
+        `This order is ${elapsedDays} days old and the seller's returns window is ` +
+        `${input.returnWindowDays} days. You can still message them from Support.`,
+    };
+  }
+  return { ok: true };
+}

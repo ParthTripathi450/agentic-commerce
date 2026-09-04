@@ -11,6 +11,8 @@ const schema = z.object({
   decision: z.enum(["approve", "reject"]),
   agentSessionId: z.string().max(36).optional(),
   note: z.string().max(300).optional(),
+  /** Which saved address to deliver to. Omitted means their default. */
+  addressId: z.string().max(36).nullish(),
 });
 
 /** The consent gate: only an explicit approve here can lead to a charge. */
@@ -27,6 +29,7 @@ export async function POST(request: Request) {
     decision: parsed.data.decision,
     sessionId: parsed.data.agentSessionId,
     note: parsed.data.note,
+    addressId: parsed.data.addressId ?? null,
   });
   return NextResponse.json(result);
 }

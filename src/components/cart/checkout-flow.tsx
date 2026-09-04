@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ShieldCheck, X } from "lucide-react";
 import { Alert, Button, Card, CardBody } from "@/components/ui";
+import { AddressPicker, type PickableAddress } from "./address-picker";
 import { formatMoney } from "@/lib/money";
 import type { CartView } from "@/server/commerce/cart";
 
@@ -46,12 +47,19 @@ const RAZORPAY_SRC = "https://checkout.razorpay.com/v1/checkout.js";
 export function CheckoutFlow({
   cartId,
   savedMethod,
+  addresses,
 }: {
   cartId: string;
   savedMethod: string | null;
+  addresses: PickableAddress[];
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ name: "preparing" });
+  // Their usual address, pre-selected. Re-picking one used ten times is
+  // friction with no information in it.
+  const [addressId, setAddressId] = useState<string | null>(
+    addresses.find((a) => a.isDefault)?.id ?? addresses[0]?.id ?? null,
+  );
 
   useEffect(() => {
     if (savedMethod) return; // widget not needed
@@ -102,6 +110,7 @@ export function CheckoutFlow({
           body: JSON.stringify({
             approvalId: proposal.approvalId,
             agentSessionId: proposal.agentSessionId,
+            addressId,
           }),
         })
       ).json();
@@ -113,7 +122,11 @@ export function CheckoutFlow({
       await fetch("/api/commerce/authorize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approvalId: proposal.approvalId, decision: "approve" }),
+        body: JSON.stringify({
+          approvalId: proposal.approvalId,
+          decision: "approve",
+          addressId,
+        }),
       })
     ).json();
 
@@ -244,6 +257,8 @@ export function CheckoutFlow({
             </li>
           ))}
         </ul>
+
+        <AddressPicker addresses={addresses} selectedId={addressId} onSelect={setAddressId} />
 
         <div className="rounded-lg border border-border p-3">
           <p className="text-xs font-medium text-muted-foreground">Pays with</p>

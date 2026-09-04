@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { defaultAddress, getAddress, toSnapshot } from "./addresses";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -328,6 +329,14 @@ export async function authorizeCheckout(input: {
    * orders share a single charge.
    */
   deferPayment?: boolean;
+  /**
+   * Which of the shopper's addresses to deliver to.
+   *
+   * Omitted means their default. Resolved and SNAPSHOTTED here rather than
+   * referenced, so the order keeps saying where it went even after the address
+   * is edited or deleted.
+   */
+  addressId?: string | null;
   /** Stamped on the order so its group can be found later. */
   checkoutGroupId?: string;
 }): Promise<AuthorizeResult> {
@@ -446,6 +455,19 @@ export async function authorizeCheckout(input: {
     .set({ status: "approved", decidedBy: input.userId, decidedAt: new Date(), decisionNote: input.note })
     .where(eq(approvals.id, approval.id));
 
+  /*
+   * Where this is going, frozen at the moment of purchase.
+   *
+   * A missing address does not block the order: the marketplace had orders
+   * before it had addresses, and refusing to sell to anyone who has not added
+   * one yet would be a worse failure than an order the merchant has to ask
+   * about. The order page says plainly when one is absent.
+   */
+  const chosen = input.addressId
+    ? await getAddress(input.userId, input.addressId)
+    : await defaultAddress(input.userId);
+  const shippingAddress = chosen ? toSnapshot(chosen) : null;
+
   const orderNumber = `ACP-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomUUID().slice(0, 6).toUpperCase()}`;
 
   const [order] = await db
@@ -458,6 +480,7 @@ export async function authorizeCheckout(input: {
       checkoutGroupId: input.checkoutGroupId ?? null,
       state: "pending_payment",
       totals: cart.totals,
+      shippingAddress,
       agentSessionId: sessionId,
       placedByAgent: session.agentIdentifier,
     })
