@@ -668,47 +668,57 @@ never silently dropped from a combined total.
 17. **A gateway order can cover several payments.** Group checkout settles N orders against one
     gateway order, so any lookup by `gatewayOrderId` must handle a LIST — taking the first row
     leaves every other merchant's order stuck in `pending_payment` while the money has moved.
-18. **Groq's free tier caps tokens PER DAY PER MODEL** (200k on `gpt-oss-120b`), and reasoning
+18. **`npm run doctor` calls a provider healthy while the model the agent uses is capped.**
+    It exercises one model; the cap is per model per day. Seen live: doctor printed
+    `[PASS] llm:groq — gpt-oss-120b responded in 609ms` while a direct probe of that same model
+    returned `429 ... tokens per day (TPD): Limit 200000`, and every conversational turn was
+    silently running on rule-based fallbacks with `gpt-oss-20b` answering normally the whole time.
+    **To diagnose a degraded agent, probe `GROQ_MODEL` and `GROQ_FAST_MODEL` SEPARATELY, and trust
+    `turn.degraded` over doctor.** A 429 on the primary now fails over to the provider's other model
+    before leaving the provider at all — which is what `fastModel` was always for. It does not
+    rescue `understandConversation`, whose schema the smaller model does not satisfy; that is
+    prompt work, not routing.
+19. **Groq's free tier caps tokens PER DAY PER MODEL** (200k on `gpt-oss-120b`), and reasoning
     models burn them fast. `GROQ_FAST_MODEL` (default `openai/gpt-oss-20b`) serves the
     `parse_intent` task, which fires on every conversational turn — fewer tokens *and* a separate
     daily pool, so one exhausted model no longer takes the whole agent down. A 429 surfaces as
     `provider: "deterministic-fallback"`; `LlmResult.attempts` carries the real reason.
-19. **Validate model output leniently — TRUNCATE, do not reject.** A hard `z.string().max(120)`
+20. **Validate model output leniently — TRUNCATE, do not reject.** A hard `z.string().max(120)`
     threw away an entire good understanding because the model wrote a chatty `productType`, and the
     turn silently fell back to pattern matching with no error anywhere. Caps on model text are
     sanity bounds, not correctness requirements.
-20. **Do not detect intent by enumerating a domain.** The fallback decided "purpose is known" from
+21. **Do not detect intent by enumerating a domain.** The fallback decided "purpose is known" from
     a list of sports, so it asked "what will you use them for?" at someone who had said *tennis
     shoes* — and would have done the same for badminton, squash and golf. `hasStatedPurpose()`
     instead strips filler and the product noun and asks whether ANYTHING is left. Prefer a rule
     about the shape of the sentence over a list of the words you thought of.
-21. **An eval set with SAMPLED ground truth measures nothing.** Capping expected results at 40 rows
+22. **An eval set with SAMPLED ground truth measures nothing.** Capping expected results at 40 rows
     made retrieval look broken: 178 products qualify as breathable, so returning ten genuinely
     breathable shoes scored zero when none fell in the arbitrary 40. Overall recall read 0.569; with
     complete ground truth the same index scored 0.722. A wrong harness is worse than none — it
     sends you optimising against noise.
-22. **Shared phrasing across documents compresses the embedding space.** Rendering quality scores
+23. **Shared phrasing across documents compresses the embedding space.** Rendering quality scores
     into every product's text doubled attribute recall (0.295 -> 0.629) but made two UNRELATED
     documents 27% more similar (0.186 -> 0.237), which narrowed the relevance gate's margin. Both
     effects are real; the trade was taken deliberately. Watch for it whenever boilerplate is added
     to every document.
-23. **`MIN_TOP_RELEVANCE` is measured, never chosen.** `npm run eval:relevance-gate` re-measures the
+24. **`MIN_TOP_RELEVANCE` is measured, never chosen.** `npm run eval:relevance-gate` re-measures the
     two bands. Growing the catalogue 184 -> 503 lifted the unstocked ceiling from 0.307 to 0.375,
     because a marketplace that sells kitchen appliances IS nearer to "washing machine". Re-measure
     after any material catalogue change; never raise it to block a query, because that starts
     refusing products you actually sell ("noise cancelling headphones" sits at 0.373).
-24. **A min-max normalised criterion cannot carry a fixed threshold.** A relevance gate keyed off
+25. **A min-max normalised criterion cannot carry a fixed threshold.** A relevance gate keyed off
     `criteria.normalized` looked right on a 60-candidate search and cut the entire result set on a
     small one: normalisation is min-max across the survivors, so with two candidates the runner-up
     is 0 BY CONSTRUCTION however close it really was. Thresholds belong on raw scores.
-25. **RRF scores are rank-based and decay steeply, so ratios of them are a blunt instrument.**
+26. **RRF scores are rank-based and decay steeply, so ratios of them are a blunt instrument.**
     Measured on "black running shoes for daily road training": top 1.00, then genuinely relevant
     running shoes at 0.43, 0.39, 0.33, a walking shoe at 0.29 and a sandal at 0.27. Any ratio strict
     enough to exclude an off-topic item also excludes legitimate ones. A relevance gate built this
     way was tried, measured and REMOVED — the fix for off-topic results was making the lexical leg
     work, not post-filtering the ranking.
 
-26. **Boilerplate in a chunk is what the embedding learns.** Evidence chunks were built as
+27. **Boilerplate in a chunk is what the embedding learns.** Evidence chunks were built as
     `"Review of <product> (<category>) — <n> out of 5. <title> <body>"`. On a two-line review that
     prefix is half the tokens, so the vector encoded the template every chunk shares instead of the
     sentence that distinguishes it — §8.23 with the volume turned up. It failed exactly as you would
@@ -716,7 +726,7 @@ never silently dropped from a combined total.
     The chunk is now the opinion and nothing else; `productId`, `merchantId` and `ratingBp` are
     COLUMNS and can be filtered, joined and displayed without being embedded, which is the reason
     the evidence lives in its own table at all.
-27. **A generated corpus can contradict itself, and 41% of this one did.** `titleFor` took its
+28. **A generated corpus can contradict itself, and 41% of this one did.** `titleFor` took its
     sentiment from the reviewer's OVERALL stars while the body took its from each quality's own
     score. Those disagree precisely when a product is good at one thing and bad overall — a shoe
     scoring breathability 4 and durability 1 rates ~2.5 stars, and was titled "Breathability is the
@@ -726,11 +736,11 @@ never silently dropped from a combined total.
     bodies and ratings. **Whenever generated text and generated numbers describe the same thing,
     assert they agree** — §6 says a self-contradicting dataset is worse than none, and this is how
     one gets in.
-28. **A backtick inside a `` sql`` `` template comment terminates the template.** Writing
+29. **A backtick inside a `` sql`` `` template comment terminates the template.** Writing
     "the `vec` and `lex` legs" in a SQL comment inside a tagged template ends the string, and the
     error surfaces as `TS1005: ',' expected` pointing at prose — nowhere near a real syntax problem.
 
-29. **The image service admits roughly ONE anonymous request in flight.** Measured: 3 concurrent
+30. **The image service admits roughly ONE anonymous request in flight.** Measured: 3 concurrent
     returned two 429s, 6 returned five. There is no throughput to win by parallelising — raising
     concurrency earns rate-limit errors, not images. What makes a long run finish is **retrying**,
     because a 429 means "in a moment" and the old code treated it exactly like a permanent failure:
@@ -739,24 +749,24 @@ never silently dropped from a combined total.
     429/408/5xx/timeout; a 400 will fail identically forever and must not burn the budget. At ~40s
     an image the full catalogue is a many-hour job, so pairs are photographed **most-sold first** and
     every run is resumable (`image_url IS NULL`).
-30. **Never run `npm run build` while `npm run dev` is running** — they share `.next`, and the build
+31. **Never run `npm run build` while `npm run dev` is running** — they share `.next`, and the build
     reads chunks the dev server is rewriting. It fails with a DIFFERENT error each time
     (`Failed to collect page data`, `TypeError: a[d] is not a function` in webpack-runtime) on
     whichever route lost the race, which reads as a real bug in that route. Kill dev, `rm -rf .next`,
     then build.
 
-31. **A client component importing a value from a module that imports `db` breaks the build.**
+32. **A client component importing a value from a module that imports `db` breaks the build.**
     `browse-filters.tsx` ("use client") imported `BROWSE_SORTS` from `server/catalog/browse.ts`,
     which dragged the `postgres` driver into the browser bundle:
     `Module not found: Can't resolve 'net'` — and because it is a compile error, it 500s every
     route, not just the new one. `import type` alone is erased and would have been safe; importing
     a VALUE is what pulls the module graph across. Same rule as #14: what both sides share lives in
     a module that imports neither side's machinery (`src/lib/browse.ts`).
-32. **A heading over an empty chart reads as a rendering failure.** Chart components that return
+33. **A heading over an empty chart reads as a rendering failure.** Chart components that return
     `null` for an empty set must take the label with them — otherwise the section title survives
     over blank space and looks broken.
 
-33. **Tests that name a specific product are brittle at scale.** Two search tests pinned
+34. **Tests that name a specific product are brittle at scale.** Two search tests pinned
     "Velocity Run 3" in the top 10 of a generic query. That held at 184 products; at 503 the ten
     returned depend on stock levels other suites legitimately mutate, so they passed alone and
     failed in the suite. Assert the PROPERTY (results are relevant; a named product is retrievable
@@ -764,13 +774,13 @@ never silently dropped from a combined total.
 
 
 
-34. **A model that answers confidently but wrongly is worse than one that fails.** `refine.ts` did
+35. **A model that answers confidently but wrongly is worse than one that fails.** `refine.ts` did
     `want = value`, replacing the rule extraction wholesale — so when the model returned
     `color: null` for a sentence plainly saying "volt", the rules' correct reading was discarded and
     the turn fell through to a catch-all, with `degraded: false` and no error anywhere. Rules are a
     SAFETY NET over the model, not merely a substitute when it is offline: back-fill the fields the
     model left null, and let a value it actually stated win. Same shape as §8.8.
-35. **A question about the CONTAINER is not a question about the CONTENT.** "What are some of the
+36. **A question about the CONTAINER is not a question about the CONTENT.** "What are some of the
     reviews?" cannot be served by retrieval over reviews — they discuss the product, not themselves —
     and it scores 0.311 where "is it comfortable" scores 0.553, so the relevance floor rejects it
     correctly and the reviews stay unreachable. Recognise the shape and return a SAMPLE. Watch for
