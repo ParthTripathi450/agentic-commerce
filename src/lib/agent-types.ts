@@ -21,6 +21,19 @@ export type AgentStep =
   | "ANALYZE"
   | "RECOMMEND"
   | "EXECUTE"
+  /*
+   * Revenue-recovery agent.
+   *
+   * DETECT and DIAGNOSE are named separately from ANALYZE because they answer
+   * different questions and can disagree: detection says money is at risk,
+   * diagnosis says whether anything can be done about it, and a case that is
+   * detected but undiagnosable is the one worth escalating. VERIFY is its own
+   * step because recovery is only real when a payment is captured — folding it
+   * into EXECUTE would let "message sent" read as "revenue recovered".
+   */
+  | "DETECT"
+  | "DIAGNOSE"
+  | "VERIFY"
   // cross-cutting
   | "POLICY_CHECK"
   | "MANDATE"

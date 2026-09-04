@@ -71,6 +71,20 @@
       "when": 1788533277614,
       "tag": "0009_shallow_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788538884051,
+      "tag": "0010_aberrant_zodiak",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788539488068,
+      "tag": "0011_sturdy_mercury",
+      "breakpoints": true
     }
   ]
 }

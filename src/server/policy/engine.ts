@@ -22,7 +22,12 @@ export type PolicyAction =
   | { type: "merchant_discount"; bp: number }
   | { type: "merchant_restock"; units: number; costMinor: number }
   | { type: "merchant_availability"; enable: boolean }
-  | { type: "merchant_publish" };
+  | { type: "merchant_publish" }
+  // revenue-recovery side. Every recovery action is money or the shopper's
+  // attention, so all of them are gated here rather than inside the agent.
+  | { type: "recovery_message"; messagesSoFar: number }
+  | { type: "recovery_retry"; retriesSoFar: number }
+  | { type: "recovery_incentive"; bp: number; amountMinor: number };
 
 export type PolicyContext = {
   userId?: string;
@@ -49,6 +54,14 @@ export type PolicyDecision = {
  * safe rather than permissive, and payment always needs explicit consent.
  */
 export const PLATFORM_DEFAULTS: PolicyLimits = {
+  // Recovery: bounded low on purpose. An agent that contacts a shopper twice
+  // and stops is recoverable from; one that contacts them ten times has
+  // already cost the merchant the customer.
+  maxRecoveryRetries: 2,
+  maxRecoveryMessages: 2,
+  maxRecoveryDiscountBp: 1000,
+  maxRecoveryDiscountMinor: 50_000,
+  allowAutoRecovery: true,
   // Bounded, but sized for a catalog that legitimately sells ₹12,000 items.
   // The meaningful guard is requireApprovalAboveMinor: 0 below — every payment
   // needs explicit consent — not an arbitrarily low ceiling.
@@ -262,6 +275,49 @@ export async function evaluatePolicy(
     case "merchant_availability":
       boundsChecked.push("requireApprovalForAll");
       break;
+
+    /*
+     * Recovery actions are counted BEFORE they happen.
+     *
+     * `messagesSoFar` is what has already been sent, so the check is whether
+     * one MORE is allowed. Passing the count in rather than reading it here
+     * keeps the engine pure and lets the caller enforce the same rule against
+     * a case row that is the single source of truth for it.
+     */
+    case "recovery_message": {
+      denyIfOver("maxRecoveryMessages", action.messagesSoFar + 1);
+      break;
+    }
+
+    case "recovery_retry": {
+      denyIfOver("maxRecoveryRetries", action.retriesSoFar + 1);
+      break;
+    }
+
+    case "recovery_incentive": {
+      // Both bounds, because a percentage of a large basket is a large sum and
+      // a merchant who capped the percentage did not agree to the cash.
+      denyIfOver("maxRecoveryDiscountBp", action.bp, (n) => `${bpToPercent(n).toFixed(1)}%`);
+      denyIfOver("maxRecoveryDiscountMinor", action.amountMinor, (n) => formatMoney(n));
+      break;
+    }
+  }
+
+  /*
+   * A merchant who has not switched automatic recovery on gets an approval for
+   * every recovery action, whatever the amounts.
+   */
+  if (action.type.startsWith("recovery_") && limits.allowAutoRecovery === false) {
+    boundsChecked.push("allowAutoRecovery");
+    if (violations.length === 0) {
+      return {
+        verdict: "REQUIRE_APPROVAL",
+        reason: "This merchant reviews every recovery action before it happens.",
+        boundsChecked,
+        violations,
+        limits,
+      };
+    }
   }
 
   if (violations.length > 0) {

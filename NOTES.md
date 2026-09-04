@@ -726,6 +726,46 @@ exceed it together — without the group check, splitting a purchase across merc
 to spend past a daily limit. Baskets that cannot be included are returned in `excluded` and shown,
 never silently dropped from a combined total.
 
+### AI Revenue Recovery Agent (`server/agents/recovery/`)
+Detects revenue at risk, works out why, chooses a bounded intervention, executes it, verifies
+whether the money actually came back, and records the lot. Six stages, six files, each testable on
+its own: **DETECT → DIAGNOSE → DETERMINE → POLICY → ACT → VERIFY → RECORD**.
+
+It **extends** the loop the merchant insight agent already used rather than duplicating it — the same
+`approvals` table, the same `evaluatePolicy`, the same append-only `agent_events`. What was missing
+was a domain: that agent detects INVENTORY risk and nothing detected REVENUE risk.
+
+**The model never decides and never spends.** Detection is SQL, diagnosis is a mapping from
+evidence, the choice of action is a decision table, and the bounds are the same policy engine that
+gates customer payments. Outreach wording is deterministic too, because every sentence a shopper
+reads states a fact the case already holds.
+
+Rules that carry the feature:
+- **`unknown` is a first-class diagnosis.** Most gateway failures arrive terse or empty. Razorpay's
+  real "signature does not match" identifies nothing a shopper can act on, so it escalates rather
+  than being pattern-matched into "card declined" — which would tell someone an untruth about their
+  own bank. On live data, 4 of 5 detected cases correctly escalated as unknown.
+- **Stopping rules are evaluated FIRST**, before any reason to act, so no combination of inputs
+  produces a third message or a fourth retry. A rule that only usually stops is not a stopping rule.
+- **Revenue is counted only from a captured payment.** An agent that counted a sent message as a
+  recovery reports a number entirely within its own control.
+- **An incentive is the last lever**: never on a first contact, never twice, bounded by BOTH a
+  percentage and a cash cap, and it expires — a recovery discount that outlives the basket becomes
+  a standing discount nobody agreed to.
+- **Nothing is invented.** Outreach uses the real support threads; an incentive is a real
+  `promotions` row with a usable code. There is no stored credential, so "retry" means a link back
+  to the same basket, never a silent re-charge.
+
+**Idempotence is the property the numbers depend on**, and the first version got it wrong: the
+unique index and the detection queries excluded only OPEN cases, so an escalated case stopped
+colliding and the next sweep re-detected it. Three passes produced 13 cases for 5 risks and 12
+escalation threads. One case per subject EVER now — an escalated case has an owner and an outcome.
+
+`failed_subscription` and `overdue_invoice` are named in the scenario enum and detected by nothing:
+this marketplace has no subscriptions and no invoices, and building the tables to demonstrate a
+dunning flow would be a fake feature dressed as a real one. The slots exist so those scenarios drop
+in without touching any stage.
+
 ### Protocols
 - **MCP**: 6 tools, stdio (`npm run mcp:stdio`) + stateless JSON-RPC at `/api/mcp`. No tool can
   charge; `prepare_purchase` returns an authorization URL.

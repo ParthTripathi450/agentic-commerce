@@ -31,6 +31,7 @@ const MERCHANT_PRIMARY: NavItem[] = [
   { href: "/merchant/orders", label: "Orders", icon: "merchantOrders" },
   { href: "/merchant/promotions", label: "Promotions", icon: "promotions" },
   { href: "/merchant/insights", label: "Insights", icon: "insights" },
+  { href: "/merchant/recovery", label: "Revenue recovery", icon: "limits" },
   { href: "/merchant/reviews", label: "Reviews", icon: "reviews" },
 ];
 

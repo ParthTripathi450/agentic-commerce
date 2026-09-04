@@ -143,6 +143,22 @@ export type PolicyLimits = {
   maxRestockCostMinor?: number;
   allowAutoPublish?: boolean;
   requireApprovalForAll?: boolean;
+  // revenue-recovery side
+  /** Recovery links offered for one case before it stops. */
+  maxRecoveryRetries?: number;
+  /** Messages sent to one shopper about one case before it stops. */
+  maxRecoveryMessages?: number;
+  /** Largest discount the agent may offer unaided, in basis points. */
+  maxRecoveryDiscountBp?: number;
+  /** And its cash ceiling, so a percentage cannot become a large sum. */
+  maxRecoveryDiscountMinor?: number;
+  /**
+   * Whether recovery may act without a human at all.
+   *
+   * Off means every action becomes an approval — which is a legitimate way for
+   * a cautious merchant to run this, not a degraded mode.
+   */
+  allowAutoRecovery?: boolean;
 };
 
 export const agentPolicies = pgTable("agent_policies", {
