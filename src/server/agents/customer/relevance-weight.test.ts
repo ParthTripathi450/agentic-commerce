@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { hybridSearch } from "@/server/catalog/search";
 import { intentToQuery } from "./intent";
 import { shoppingIntentSchema } from "./intent-schema";
-import { WEIGHT_PRESETS, rankCandidates, withAffinity, withFocus } from "./ranker";
+import {
+  WEIGHT_PRESETS,
+  rankCandidates,
+  withAffinity,
+  withFocus,
+  withPurpose,
+} from "./ranker";
 
 /**
  * Relevance is a gate, not a preference.
@@ -99,5 +105,37 @@ describe("the lexical leg answers a sentence, not only keywords", () => {
     // Stripped to nothing lexically, the vector leg decides alone rather than
     // the OR query matching the entire catalogue.
     expect(search.noRelevantMatch || search.candidates.length >= 0).toBe(true);
+  });
+});
+
+describe("an explicit choice outranks an inferred one", () => {
+  it("keeps a chosen feature at its full share when affinity and purpose join", () => {
+    // Each carve used to scale the shares taken by earlier ones, so a shopper
+    // who picked "comfort" ended at 0.169 — barely above the 0.15 given to a
+    // profile inferred from their history and never asked for.
+    const all = withPurpose(withAffinity(withFocus(WEIGHT_PRESETS.balanced, "comfort"), true), true);
+
+    expect(all.focus).toBeCloseTo(0.24, 6);
+    expect(all.focus!).toBeGreaterThan(all.affinity!);
+    expect(all.focus!).toBeGreaterThan(all.purpose!);
+  });
+
+  it("still sums to one, in every combination", () => {
+    const combos = [
+      withFocus(WEIGHT_PRESETS.balanced, "comfort"),
+      withAffinity(WEIGHT_PRESETS.balanced, true),
+      withPurpose(WEIGHT_PRESETS.balanced, true),
+      withPurpose(withAffinity(withFocus(WEIGHT_PRESETS.cheapest, "grip"), true), true),
+      withAffinity(withPurpose(WEIGHT_PRESETS.best_quality, true), true),
+    ];
+    for (const weights of combos) {
+      const total = Object.values(weights).reduce((sum, w) => sum + w, 0);
+      expect(total).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("never lets any of them erode relevance", () => {
+    const all = withPurpose(withAffinity(withFocus(WEIGHT_PRESETS.balanced, "grip"), true), true);
+    expect(all.relevance).toBe(WEIGHT_PRESETS.balanced.relevance);
   });
 });

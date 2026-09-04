@@ -73,19 +73,34 @@ export function QualityBars({
   const shown = limit ? rows.slice(0, limit) : rows;
 
   return (
-    <dl className={cn("grid gap-2 sm:grid-cols-2", className)}>
+    <dl className={cn("grid gap-x-6 gap-y-2 sm:grid-cols-2", className)}>
       {shown.map(([key, score]) => (
-        <div key={key} className="flex items-center gap-2.5">
-          <dt className="w-32 shrink-0 truncate text-xs text-muted-foreground">
+        /*
+         * Label flexes, meter never does.
+         *
+         * This was `w-32` label + `flex-1` meter, and flex children default to
+         * `min-width: auto` — so the fixed-width segments could not shrink, the
+         * row overflowed its grid cell into the next column, and the last
+         * segments were clipped by the card edge. A two-track grid fixes both
+         * ends: the label gets `minmax(0,1fr)` so it truncates instead of
+         * pushing, and the meter is sized by its content so it is never
+         * squeezed or cut.
+         */
+        <div
+          key={key}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3"
+          title={`${humanizeQuality(key)} — ${score} out of 5`}
+        >
+          <dt className="min-w-0 truncate text-xs text-muted-foreground">
             {humanizeQuality(key)}
           </dt>
-          <dd className="flex flex-1 items-center gap-2">
+          <dd className="flex items-center gap-2">
             <span className="flex gap-0.5" aria-hidden>
               {[1, 2, 3, 4, 5].map((step) => (
                 <span
                   key={step}
                   className={cn(
-                    "h-1.5 w-4 rounded-full",
+                    "h-1.5 w-3.5 rounded-full",
                     step <= score
                       ? score >= 4
                         ? "bg-success"
@@ -98,7 +113,7 @@ export function QualityBars({
               ))}
             </span>
             {/* The number, not just the bar — a bar alone is decoration. */}
-            <span className="tabular text-xs font-medium">{score}/5</span>
+            <span className="tabular w-7 text-right text-xs font-medium">{score}/5</span>
           </dd>
         </div>
       ))}

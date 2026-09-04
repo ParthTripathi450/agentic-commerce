@@ -73,6 +73,11 @@ export function AutonomousFlow({
   const [focusQuality, setFocusQuality] = useState<string | null>(null);
   /** Which question the agent last asked, so its answer is routed correctly. */
   const pendingQuestion = useRef<string | null>(null);
+  /**
+   * Whether the shopper has had their turn to add anything the questions did
+   * not cover. Asked once, and only once the agent is otherwise ready.
+   */
+  const askedExtras = useRef(false);
   /** The last thing actually searched for, so a focus answer can re-use it. */
   const lastQuery = useRef<string>("");
   const [degraded, setDegraded] = useState(false);
@@ -95,6 +100,33 @@ export function AutonomousFlow({
    * conversation becomes the single instruction the autonomous run acts on, so
    * what it buys is what was actually discussed.
    */
+  const run = useCallback(async (message: string, focus: string | null) => {
+    if (!message.trim()) return;
+    setPhase({ name: "running" });
+    try {
+      const response = await fetch("/api/agent/autonomous", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // The chosen feature travels with the instruction. It used to be
+        // dropped here, so answering the prioritise question changed nothing.
+        body: JSON.stringify({ message, focusQuality: focus }),
+      });
+      const data = await response.json();
+      if (!response.ok) return setPhase({ name: "failed", reason: data.error });
+      if (data.status === "stopped") {
+        return setPhase({
+          name: "stopped",
+          reason: data.reason,
+          details: data.details ?? [],
+          step: data.step,
+        });
+      }
+      setPhase({ name: "awaiting", outcome: data as Awaiting });
+    } catch {
+      setPhase({ name: "failed", reason: "Could not reach the agent." });
+    }
+  }, []);
+
   const send = useCallback(
     async function send(
       text: string,
@@ -196,6 +228,42 @@ export function AutonomousFlow({
           return;
         }
 
+        /*
+         * Before spending anything: one open question.
+         *
+         * The scripted questions cover purpose, size, colour and budget, which
+         * is what MOST shoppers need — but not the shopper who cares about a
+         * material, a weight limit, a brand to avoid, or anything else nobody
+         * thought to put in a slot. Enumerating those is the §8.21 trap; asking
+         * plainly is not.
+         *
+         * The answer goes back through the SAME understanding call as every
+         * other turn, so it is interpreted rather than pattern-matched, and it
+         * reaches retrieval the way everything else does — through the
+         * synthesised phrase and the quality constraints the model extracts
+         * from it. Nothing here parses the sentence itself.
+         */
+        if (!askedExtras.current) {
+          askedExtras.current = true;
+          pendingQuestion.current = null;
+          setHistory(nextHistory);
+          setMessages((m) =>
+            m.concat({
+              role: "agent",
+              content:
+                "Before I go looking — anything else I should factor in? A material, a feature, a brand, a weight limit, something to avoid. Or say \u201cnothing else\u201d and I will get on with it.",
+              note: "Whatever you say here changes what I search for, not just how I rank it.",
+            }),
+          );
+          setChips([
+            { label: "Nothing else", value: "nothing else" },
+            { label: "Must be waterproof", value: "it must be waterproof" },
+            { label: "Lightweight", value: "it should be as lightweight as possible" },
+            { label: "Hard-wearing", value: "it needs to be hard-wearing" },
+          ]);
+          return;
+        }
+
         // Understood enough — hand the synthesised instruction to the buyer.
         setHistory(nextHistory);
         const instruction =
@@ -207,14 +275,14 @@ export function AutonomousFlow({
             content: `Right — looking for ${instruction}. Let me find the best option and prepare the order.`,
           }),
         );
-        await run(instruction);
+        await run(instruction, focus);
       } catch {
         setPhase({ name: "failed", reason: "Could not reach the agent." });
       } finally {
         setChatting(false);
       }
     },
-    [answered, history, focusQuality],
+    [answered, history, focusQuality, run],
   );
 
   const resetConversation = useCallback(() => {
@@ -222,33 +290,14 @@ export function AutonomousFlow({
     setHistory([]);
     setAnswered([]);
     setChips([]);
+    // A fresh conversation gets the open question again — it was answered
+    // about a different shopping trip.
+    askedExtras.current = false;
+    pendingQuestion.current = null;
+    setFocusQuality(null);
     setPhase({ name: "idle" });
   }, []);
 
-  async function run(message: string) {
-    if (!message.trim()) return;
-    setPhase({ name: "running" });
-    try {
-      const response = await fetch("/api/agent/autonomous", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-      });
-      const data = await response.json();
-      if (!response.ok) return setPhase({ name: "failed", reason: data.error });
-      if (data.status === "stopped") {
-        return setPhase({
-          name: "stopped",
-          reason: data.reason,
-          details: data.details ?? [],
-          step: data.step,
-        });
-      }
-      setPhase({ name: "awaiting", outcome: data as Awaiting });
-    } catch {
-      setPhase({ name: "failed", reason: "Could not reach the agent." });
-    }
-  }
 
   /**
    * Take the agent's choice, but not the charge.

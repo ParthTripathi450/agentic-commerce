@@ -264,6 +264,19 @@ is rule-parsed rather than empty.
 
 **Autonomous mode passes `skipQuestions: true`** — nobody is at the keyboard to answer.
 
+**One open question before it spends anything.** The scripted slots cover purpose, size, colour and
+budget — what most shoppers need, but not the one who cares about a material, a weight limit or a
+brand to avoid. Enumerating those is §8.21's trap; asking plainly is not. The answer goes back
+through the SAME understanding call as every other turn, so it reaches retrieval as a `searchPhrase`
+and as `qualityConstraints` — measured: "it must be waterproof" becomes
+`waterResistance >= 4` and moves the results from shoes rated 1/5 for water resistance to shoes
+rated 5/5. Nothing parses that sentence by hand.
+
+**Everything the shopper said must reach the run.** `runAutonomousPurchase` took a single synthesised
+sentence and nothing else, so a shopper who answered the prioritise question had that answer dropped
+before anything was ranked — asking them was theatre. `focusQuality` now travels with the
+instruction.
+
 ### What a product is FOR (`server/agents/customer/purpose.ts`)
 Relevance cannot separate a leather dress shoe from a leather sneaker — they are genuinely close in
 both embedding and keyword space — so "formal shoes for the office" put Court Sneakers second, ahead
@@ -296,7 +309,10 @@ reordered by drag OR by up/down buttons; the buttons are the real control, since
 unusable by keyboard. `weightsFromOrder()` is rank-proportional, so reordering shifts the ranking
 without collapsing it into a single sort key, and a partial order is still valid.
 **`relevance` is not in the list** — it is not a preference, it is what keeps results about the
-thing that was asked for. **That is enforced, not just stated:** `withFocus` and
+thing that was asked for. A share already carved out is protected too: `carve()` scaled
+every earlier share when a later criterion was added, so an explicitly chosen feature ended at 0.169
+— barely above the 0.15 given to a taste profile inferred from history and never requested. What
+someone asks for outright must not be watered down by what we worked out about them. **That is enforced, not just stated:** `withFocus` and
 `withAffinity` carve their share out of the PREFERENCES only and leave relevance untouched. They used
 to scale it down like everything else, so a shopper who asked for tennis shoes, chose "comfort" and
 had a taste profile got relevance weighted at 0.142 — at which point a cheap, comfortable casual

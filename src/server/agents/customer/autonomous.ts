@@ -72,6 +72,16 @@ export async function runAutonomousPurchase(input: {
   userId: string;
   message: string;
   quantity?: number;
+  /**
+   * A rated feature the shopper asked to prioritise.
+   *
+   * Passed through rather than re-derived: the autonomous run used to take a
+   * single synthesised sentence and nothing else, so a shopper who answered
+   * "comfort" to the prioritise question had that answer silently dropped
+   * before anything was ranked. Everything they said has to reach the search,
+   * or asking them was theatre.
+   */
+  focusQuality?: string | null;
 }): Promise<AutonomousOutcome> {
   // Steps 1-4: the same audited pipeline the assisted flow uses.
   /*
@@ -86,6 +96,7 @@ export async function runAutonomousPurchase(input: {
     message: input.message,
     limit: 5,
     skipQuestions: true,
+    focusQuality: input.focusQuality ?? null,
   });
 
   if (turn.outcome === "needs_clarification") {

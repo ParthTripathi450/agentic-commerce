@@ -195,21 +195,41 @@ const FOCUS_WEIGHT = 0.24;
  * Everything else is scaled proportionally so the weights still sum to 1 and
  * the displayed contributions remain percentages of something real.
  */
-function carve(weights: Weights, key: "focus" | "affinity" | "purpose", share: number): Weights {
-  const protectedTotal = weights.relevance;
+const CARVED = ["focus", "affinity", "purpose"] as const;
+
+function carve(weights: Weights, key: (typeof CARVED)[number], share: number): Weights {
+  /*
+   * A share already carved out is protected, exactly like relevance.
+   *
+   * `carve` scaled everything except relevance and its own key, so each later
+   * call shrank the shares taken by earlier ones. A shopper who picked
+   * "comfort" got 0.24, then affinity took its cut and purpose took another,
+   * leaving the feature they explicitly asked for at 0.169 — barely above the
+   * 0.15 given to a profile inferred from their history and never requested.
+   * What someone asks for outright must not be watered down by what we worked
+   * out about them.
+   */
+  const alreadyCarved = CARVED.filter((k) => k !== key && weights[k] != null);
+  const protectedKeys = new Set<string>(["relevance", ...alreadyCarved]);
+
+  const protectedTotal = [...protectedKeys].reduce(
+    (sum, k) => sum + (weights[k as keyof Weights] ?? 0),
+    0,
+  );
   const flexible = Object.entries(weights).filter(
-    ([k]) => k !== key && k !== "relevance",
+    ([k]) => k !== key && !protectedKeys.has(k),
   ) as [string, number][];
 
   const flexibleTotal = flexible.reduce((sum, [, v]) => sum + v, 0);
   const room = Math.max(0, 1 - protectedTotal - share);
   const scale = flexibleTotal > 0 ? room / flexibleTotal : 0;
 
-  const scaled = Object.fromEntries(
-    flexible.map(([k, v]) => [k, v * scale]),
-  ) as Omit<Weights, "relevance">;
+  const scaled = Object.fromEntries(flexible.map(([k, v]) => [k, v * scale]));
+  const kept = Object.fromEntries(
+    [...protectedKeys].map((k) => [k, weights[k as keyof Weights] ?? 0]),
+  );
 
-  return { ...scaled, relevance: protectedTotal, [key]: share } as Weights;
+  return { ...scaled, ...kept, [key]: share } as Weights;
 }
 
 export function withFocus(weights: Weights, focusKey: string | null | undefined): Weights {

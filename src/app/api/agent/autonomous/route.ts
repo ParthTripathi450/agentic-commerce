@@ -8,6 +8,8 @@ export const dynamic = "force-dynamic";
 
 const bodySchema = z.object({
   message: z.string().min(2, "Say what you would like the agent to buy").max(500),
+  /** A rated feature to weight heavily, chosen by the shopper. */
+  focusQuality: z.string().max(60).nullish(),
   quantity: z.number().int().min(1).max(5).optional(),
 });
 
@@ -36,6 +38,7 @@ export async function POST(request: Request) {
     const outcome = await runAutonomousPurchase({
       userId: session.user.id,
       message: parsed.data.message,
+      focusQuality: parsed.data.focusQuality ?? null,
       quantity: parsed.data.quantity,
     });
     // A stop is a valid, explainable answer — 200 with the reason it stopped.
