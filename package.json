@@ -29,6 +29,7 @@
     "db:fix-review-titles": "tsx --env-file=.env.local src/db/fix-review-titles.ts",
     "eval:generate": "tsx --env-file=.env.local src/db/generate-eval-set.ts",
     "eval:retrieval": "tsx --env-file=.env.local src/scripts/eval-retrieval.ts",
+    "eval:for-you": "tsx --env-file=.env.local src/scripts/eval-for-you.ts",
     "eval:relevance-gate": "tsx --env-file=.env.local src/scripts/measure-relevance-gate.ts"
   },
   "dependencies": {

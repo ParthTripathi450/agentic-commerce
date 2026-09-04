@@ -104,8 +104,27 @@ export type KnowledgeBase = {
  * variant they chose). Recency decay is applied here so every axis downstream
  * inherits it and none can forget to.
  */
-function signalsCte(userId: string) {
-  const decay = sql`exp(-EXTRACT(EPOCH FROM (now() - occurred_at)) / 86400.0 / ${DECAY_DAYS})`;
+function signalsCte(userId: string, asOfDate?: Date) {
+  // The driver binds strings, not Dates, in a raw template.
+  const asOf = asOfDate?.toISOString();
+  /*
+   * `asOf` exists for evaluation, and it is the difference between a real
+   * measurement and a meaningless one.
+   *
+   * To ask "would this profile have predicted what they bought next?", the
+   * profile must be built from what was known BEFORE that purchase. Without a
+   * cutoff the purchase being predicted is itself in the profile, and the
+   * answer is a tautology dressed up as a score.
+   */
+  const cutoff = asOf ? sql`AND o.created_at < ${asOf}` : sql``;
+  const reviewCutoff = asOf ? sql`AND r.created_at < ${asOf}` : sql``;
+  const basketCutoff = asOf ? sql`AND ci.created_at < ${asOf}` : sql``;
+  const signalCutoff = asOf ? sql`AND s.created_at < ${asOf}` : sql``;
+
+  // Decay is measured from the cutoff, not from now: a profile "as of" a past
+  // date must age its evidence as it would have then.
+  const reference = asOf ? sql`${asOf}::timestamptz` : sql`now()`;
+  const decay = sql`exp(-EXTRACT(EPOCH FROM (${reference} - occurred_at)) / 86400.0 / ${DECAY_DAYS})`;
   return sql`
     raw AS (
       -- Paid for it.
@@ -115,7 +134,7 @@ function signalsCte(userId: string) {
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       JOIN product_variants v ON v.id = oi.variant_id
-      WHERE o.user_id = ${userId} AND o.state IN ('paid','fulfilled')
+      WHERE o.user_id = ${userId} AND o.state IN ('paid','fulfilled') ${cutoff}
 
       UNION ALL
 
@@ -125,7 +144,7 @@ function signalsCte(userId: string) {
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       JOIN product_variants v ON v.id = oi.variant_id
-      WHERE o.user_id = ${userId} AND o.state = 'canceled'
+      WHERE o.user_id = ${userId} AND o.state = 'canceled' ${cutoff}
 
       UNION ALL
 
@@ -137,7 +156,7 @@ function signalsCte(userId: string) {
              CASE WHEN r.rating_bp >= ${PRAISED_BP} THEN 'praised' ELSE 'panned' END
       FROM product_reviews r
       WHERE r.user_id = ${userId}
-        AND (r.rating_bp >= ${PRAISED_BP} OR r.rating_bp <= ${PANNED_BP})
+        AND (r.rating_bp >= ${PRAISED_BP} OR r.rating_bp <= ${PANNED_BP}) ${reviewCutoff}
 
       UNION ALL
 
@@ -149,7 +168,7 @@ function signalsCte(userId: string) {
       FROM cart_items ci
       JOIN carts c ON c.id = ci.cart_id
       JOIN product_variants v ON v.id = ci.variant_id
-      WHERE c.user_id = ${userId} AND c.status <> 'converted'
+      WHERE c.user_id = ${userId} AND c.status <> 'converted' ${basketCutoff}
 
       UNION ALL
 
@@ -157,7 +176,7 @@ function signalsCte(userId: string) {
       SELECT ${WEIGHTS.browse}::numeric, s.product_id, '{}'::jsonb,
              s.price_minor, s.created_at, 'browse'
       FROM shopper_signals s
-      WHERE s.user_id = ${userId} AND s.product_id IS NOT NULL
+      WHERE s.user_id = ${userId} AND s.product_id IS NOT NULL ${signalCutoff}
     ),
     signals AS (
       SELECT raw.w * ${decay} AS weight,
@@ -174,13 +193,17 @@ function signalsCte(userId: string) {
     )`;
 }
 
-export async function buildKnowledgeBase(userId: string): Promise<KnowledgeBase> {
+export async function buildKnowledgeBase(
+  userId: string,
+  options: { asOf?: Date } = {},
+): Promise<KnowledgeBase> {
+  const asOf = options.asOf?.toISOString();
   const [axisRows, budgetRows, searchRows, evidenceRows] = await Promise.all([
     // One long-format result: (axis, value, score, products). Aggregating each
     // axis in SQL rather than pulling every signal into JS keeps this one round
     // trip whether the shopper has ten actions or ten thousand.
     db.execute<Record<string, unknown>>(sql`
-      WITH ${signalsCte(userId)}
+      WITH ${signalsCte(userId, options.asOf)}
       SELECT 'category' AS axis, category AS value,
              SUM(weight) AS score, COUNT(DISTINCT product_id) AS products
       FROM signals WHERE category IS NOT NULL GROUP BY category
@@ -221,15 +244,17 @@ export async function buildKnowledgeBase(userId: string): Promise<KnowledgeBase>
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       WHERE o.user_id = ${userId} AND o.state IN ('paid','fulfilled')
+        ${asOf ? sql`AND o.created_at < ${asOf}` : sql``}
     `),
     db.execute<Record<string, unknown>>(sql`
       SELECT DISTINCT ON (lower(query)) query, created_at
       FROM shopper_signals
       WHERE user_id = ${userId} AND kind = 'search' AND query IS NOT NULL AND query <> ''
+        ${asOf ? sql`AND created_at < ${asOf}` : sql``}
       ORDER BY lower(query), created_at DESC
     `),
     db.execute<Record<string, unknown>>(sql`
-      WITH ${signalsCte(userId)}
+      WITH ${signalsCte(userId, options.asOf)}
       SELECT source, COUNT(*) AS n FROM signals GROUP BY source
     `),
   ]);

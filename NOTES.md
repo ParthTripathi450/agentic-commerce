@@ -563,6 +563,40 @@ IP, referrer or user agent. Views dedupe over 30 minutes, and `deleteShopperSign
 Orders and reviews are NOT erasable there: they are records of real transactions, not preferences we
 inferred.
 
+### Measuring "For you" (`server/shopper/for-you-eval.ts`, `npm run eval:for-you`)
+Every recommender's output looks plausible, which is exactly the problem — "better suggestions" is
+not a claim anyone can check by looking at the page. So this asks a question with a right answer:
+**hold back each repeat shopper's most recent purchase, rebuild their profile from what was known
+BEFORE it, and see how highly the thing they actually bought is ranked.**
+
+`buildKnowledgeBase(userId, { asOf })` exists for this. Without the cutoff the purchase being
+predicted sits in the profile predicting it, and the score is a tautology that looks like success.
+Decay is measured from the cutoff too — a profile "as of" a past date must age its evidence as it
+would have then.
+
+**Baselines are reported beside it, or the number is unreadable.** 0.023 is good against random and
+poor against popularity, and only the comparison says which. A personalisation that cannot beat
+"show the bestsellers" is not personalisation.
+
+**First run — the profile loses to popularity:**
+
+| ranking | recall@10 | recall@20 | MRR |
+|---|---|---|---|
+| affinity | 0.023 | 0.023 | 0.022 |
+| popularity | **0.035** | **0.070** | **0.037** |
+| random | 0.012 | 0.023 | 0.010 |
+
+**And the reason is the DATA, not the ranker.** The average repeat shopper in the seed has 62
+purchases spread across 25 of the 57 categories — that is not a person, it is a uniform sample of
+the catalogue, and no profile can predict a uniform sample. Categories-per-purchase sits at 0.47,
+meaning roughly every other order enters a brand-new category.
+
+So the honest reading is that **this task is currently unlearnable on this data**, and fitting
+weights against it would fit noise. Two things follow: give seeded shoppers personas (a few
+preferred categories and brands) so the data has structure worth learning, and treat the number as a
+regression guard until real shoppers exist. The harness has already earned its place by saying so
+rather than letting a plausible-looking page pass for evidence.
+
 ### Suggestions from the profile (`server/shopper/for-you.ts` + `/for-you`)
 The failure this is designed against is a "for you" page that is a **mirror** — a shopper who bought
 running shoes shown nothing but running shoes, from the brand they already own. Three rules:
