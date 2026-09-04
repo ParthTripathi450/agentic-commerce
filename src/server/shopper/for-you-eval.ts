@@ -76,7 +76,19 @@ export async function repeatShoppers(limit = 500): Promise<ShopperCase[]> {
     WITH paid AS (
       SELECT o.id, o.user_id, o.created_at
       FROM orders o
+      JOIN users u ON u.id = o.user_id
       WHERE o.state IN ('paid','fulfilled')
+        /*
+         * Shoppers only.
+         *
+         * The review pool buys across the whole catalogue to entitle reviews —
+         * sixty accounts with eighty orders each spanning half the categories —
+         * and integration tests leave their own accounts behind. Neither is a
+         * person with taste, and including them guaranteed an unlearnable task:
+         * the first run of this eval was largely measuring review scaffolding.
+         */
+        AND u.email NOT LIKE '%@marketplace.reviews'
+        AND u.email NOT LIKE '%@acp.test'
     ),
     ranked AS (
       SELECT user_id, id, created_at,

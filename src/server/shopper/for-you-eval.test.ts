@@ -83,3 +83,30 @@ describe("evaluateForYou", () => {
     expect(b).toEqual(a);
   });
 });
+
+describe("the eval measures shoppers, not scaffolding", () => {
+  it("excludes the review pool and integration-test accounts", async () => {
+    // Sixty review-pool accounts buy across the whole catalogue to entitle
+    // reviews, and tests leave their own behind. Neither is a person with
+    // taste, and including them guaranteed an unlearnable task — the first run
+    // of this eval was largely measuring review scaffolding.
+    const cases = await repeatShoppers(500);
+    const [{ emails }] = (await db.execute(sql`
+      SELECT ARRAY_AGG(email) AS emails FROM users
+      WHERE id IN (${sql.join(cases.map((c) => sql`${c.userId}`), sql`, `)})
+    `)) as unknown as { emails: string[] }[];
+
+    for (const email of emails ?? []) {
+      expect(email, email).not.toMatch(/@marketplace\.reviews$/);
+      expect(email, email).not.toMatch(/@acp\.test$/);
+    }
+  });
+
+  it("beats popularity now that shoppers have coherent histories", async () => {
+    // This is the point of the persona seed: with shoppers who behave like
+    // people the profile predicts them, and without it no algorithm could.
+    const result = await evaluateForYou();
+    expect(result.affinity.mrr).toBeGreaterThan(result.popularity.mrr);
+    expect(result.affinity.recallAt10).toBeGreaterThan(result.random.recallAt10);
+  });
+});

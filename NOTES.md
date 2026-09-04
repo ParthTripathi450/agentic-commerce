@@ -586,16 +586,41 @@ poor against popularity, and only the comparison says which. A personalisation t
 | popularity | **0.035** | **0.070** | **0.037** |
 | random | 0.012 | 0.023 | 0.010 |
 
-**And the reason is the DATA, not the ranker.** The average repeat shopper in the seed has 62
+**The first run was measuring the wrong population.** Sixty `@marketplace.reviews` accounts own
+orders across the whole catalogue to entitle reviews, and integration tests leave `@acp.test`
+accounts behind; both are excluded now. Neither is a person with taste.
+
+**And the rest was the DATA, not the ranker.** The average repeat shopper in the seed has 62
 purchases spread across 25 of the 57 categories — that is not a person, it is a uniform sample of
 the catalogue, and no profile can predict a uniform sample. Categories-per-purchase sits at 0.47,
 meaning roughly every other order enters a brand-new category.
 
-So the honest reading is that **this task is currently unlearnable on this data**, and fitting
-weights against it would fit noise. Two things follow: give seeded shoppers personas (a few
-preferred categories and brands) so the data has structure worth learning, and treat the number as a
-regression guard until real shoppers exist. The harness has already earned its place by saying so
-rather than letting a plausible-looking page pass for evidence.
+### Shoppers who behave like people (`db/personas.ts`, `npm run db:seed-personas`)
+The seed dealt orders out with `pick(customers)` — uniformly at random — so the average repeat
+shopper held 62 purchases across 25 of 57 categories. That is a sample of the catalogue, not a
+person, and it made taste unmeasurable by construction.
+
+Ten personas over the real category vocabulary, three shoppers each, 8-22 orders apiece. They
+**overlap deliberately** (two runners differing on price; a hiker and a commuter sharing Outerwear),
+because personas that partition the catalogue cleanly would make prediction trivial and the eval
+flattering. `EXPLORE_RATE = 0.2` of purchases fall outside the persona for the same reason: a
+shopper who never strays is as unrealistic as one who never repeats.
+
+Additive and idempotent — it creates its own `@personas.test` accounts and never touches existing
+orders, because reviews cascade from orders and losing 861 of them once was enough.
+
+**With both fixes, the profile earns its place:**
+
+| ranking | recall@10 | recall@20 | MRR |
+|---|---|---|---|
+| affinity | **0.171** | **0.257** | **0.104** |
+| popularity | 0.029 | 0.029 | 0.014 |
+| random | 0.029 | 0.029 | 0.014 |
+
+Read it honestly: the personas are *designed* to be learnable, so this proves the machinery works
+end to end and the metric responds to real change. It does **not** prove human shoppers are
+predictable — that number can only come from real traffic. What it does buy today is a regression
+guard, and a task worth fitting weights against.
 
 ### Suggestions from the profile (`server/shopper/for-you.ts` + `/for-you`)
 The failure this is designed against is a "for you" page that is a **mirror** — a shopper who bought
