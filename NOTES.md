@@ -769,6 +769,12 @@ unique index and the detection queries excluded only OPEN cases, so an escalated
 colliding and the next sweep re-detected it. Three passes produced 13 cases for 5 risks and 12
 escalation threads. One case per subject EVER now — an escalated case has an owner and an outcome.
 
+**Demonstrating it**: `npm run db:seed-recovery-demo -- --reset` plants one of each scenario, then
+`npm run recovery:demo` runs the real agent over a controlled batch and prints money at risk, money
+verified recovered, escalations with their reasons, the stopping rules firing, and one case's full
+audit trail. It labels the only two simulated things — shoppers choosing to pay, and the passage of
+the 24h cooldown — because a demo that blurs the real and the staged proves nothing.
+
 `failed_subscription` and `overdue_invoice` are named in the scenario enum and detected by nothing:
 this marketplace has no subscriptions and no invoices, and building the tables to demonstrate a
 dunning flow would be a fake feature dressed as a real one. The slots exist so those scenarios drop

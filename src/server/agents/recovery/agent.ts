@@ -347,7 +347,16 @@ async function advanceCase(
     step: "POLICY_CHECK",
     observation: { summary: policy.reason, inputs: { boundsChecked: policy.boundsChecked } },
     reasoning: { summary: "Deterministic bounds, not the agent's judgement." },
-    action: { ...policyAction, verdict: policy.verdict },
+    /*
+     * The case id travels WITH the policy action.
+     *
+     * `policyAction` carries only what the engine needs to judge — amounts and
+     * counts — so a POLICY_CHECK event had nothing tying it to a case, and
+     * every case's audit trail showed every other case's policy checks. The
+     * gate is the step a merchant most needs attributable; an audit that cannot
+     * say which decision was checked is not an audit.
+     */
+    action: { ...policyAction, params: { caseId: row.id }, verdict: policy.verdict },
     outcome: {
       status: policy.verdict === "DENY" ? "blocked" : "ok",
       detail: policy.violations.map((v) => v.message).join("; ") || policy.reason,
