@@ -244,3 +244,74 @@ describe("the rules backstop the model, they do not merely replace it", () => {
     expect(backfilled.size).toBe("10");
   });
 });
+
+describe("asking for the reviews themselves", () => {
+  async function reviewedProduct() {
+    const [row] = (await db.execute(sql`
+      SELECT p.id FROM products p
+      JOIN evidence_chunks ec ON ec.product_id = p.id
+      WHERE p.status = 'active'
+      GROUP BY p.id HAVING COUNT(*) >= 5 LIMIT 1
+    `)) as unknown as { id: string }[];
+    return row?.id ?? null;
+  }
+
+  it("returns a sample when asked for reviews, which no semantic search can do", async () => {
+    // Reviews talk about shoes, not about reviews: "what are some of the
+    // reviews" scores 0.311 against its own corpus where "is it comfortable"
+    // scores 0.553. The relevance floor rejected it correctly and the reviews
+    // stayed unreachable — a question about the container needs a sample, not
+    // a search.
+    const id = await reviewedProduct();
+    if (!id) return;
+
+    const result = await refineProduct({ productId: id, message: "What are some of the reviews" });
+    expect(result!.evidence.length).toBeGreaterThan(0);
+    expect(result!.reply).toMatch(/review/i);
+  });
+
+  it("recognises the question however it is phrased", async () => {
+    const id = await reviewedProduct();
+    if (!id) return;
+
+    for (const phrasing of ["what do people say about it", "how is it rated", "any feedback"]) {
+      const result = await refineProduct({ productId: id, message: phrasing });
+      expect(result!.evidence.length, phrasing).toBeGreaterThan(0);
+    }
+  });
+
+  it("shows the critical review first when there is one", async () => {
+    // An agent whose job is to sell has to be trusted to say the bad part, or
+    // none of the good part counts for anything. Returning only the top-rated
+    // reviews would answer "what do the happiest people think".
+    const [row] = (await db.execute(sql`
+      SELECT product_id FROM evidence_chunks
+      GROUP BY product_id
+      HAVING COUNT(*) >= 5 AND MIN(rating_bp) < 4000 AND MAX(rating_bp) >= 4000
+      LIMIT 1
+    `)) as unknown as { product_id: string }[];
+    if (!row) return;
+
+    const result = await refineProduct({
+      productId: row.product_id,
+      message: "what are the reviews like",
+    });
+    const ratings = result!.evidence.map((e) => e.ratingBp ?? 0);
+    expect(ratings.length).toBeGreaterThan(1);
+    expect(ratings[0]).toBeLessThan(Math.max(...ratings));
+  });
+
+  it("says so plainly when there are no reviews", async () => {
+    const [row] = (await db.execute(sql`
+      SELECT p.id FROM products p
+      WHERE p.status = 'active'
+        AND NOT EXISTS (SELECT 1 FROM evidence_chunks ec WHERE ec.product_id = p.id)
+      LIMIT 1
+    `)) as unknown as { id: string }[];
+    if (!row) return;
+
+    const result = await refineProduct({ productId: row.id, message: "what are the reviews" });
+    expect(result!.reply.toLowerCase()).toContain("no reviews");
+    expect(result!.evidence).toEqual([]);
+  });
+});

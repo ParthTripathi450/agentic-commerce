@@ -270,3 +270,64 @@ function questionFor(quality: string): string {
 
   return phrasings[quality] ?? quality.replace(/([A-Z])/g, " $1").toLowerCase().trim();
 }
+
+/**
+ * A representative sample of a product's reviews, ignoring similarity entirely.
+ *
+ * "What are some of the reviews?" is not a semantic search and cannot be served
+ * as one: reviews talk about shoes, not about reviews, so the question scores
+ * 0.311 against its own corpus where "is it comfortable" scores 0.553. The
+ * floor correctly rejects it, and nine perfectly good reviews stay unreachable.
+ * A question about the CONTAINER needs a different answer than a question about
+ * the CONTENT.
+ *
+ * **Deliberately balanced.** Returning the top-rated reviews would be
+ * straightforwardly dishonest — the shopper asked what people think, not what
+ * the happiest people think — so the sample takes from both ends and returns
+ * the critical one first when there is one worth showing. An agent whose job is
+ * to sell has to be trusted to say the bad part, or none of the good part
+ * counts for anything.
+ */
+export async function reviewSample(
+  productId: string,
+  limit = 3,
+): Promise<{ chunks: EvidenceChunk[]; total: number; averageBp: number | null }> {
+  const rows = (await db.execute(sql`
+    SELECT ec.id, ec.product_id, ec.body, ec.rating_bp,
+           p.title AS product_title,
+           COUNT(*) OVER () AS total,
+           AVG(ec.rating_bp) OVER () AS average_bp
+    FROM evidence_chunks ec
+    JOIN products p ON p.id = ec.product_id
+    WHERE ec.product_id = ${productId}
+    ORDER BY ec.rating_bp DESC NULLS LAST
+  `)) as unknown as Record<string, unknown>[];
+
+  if (rows.length === 0) return { chunks: [], total: 0, averageBp: null };
+
+  const toChunk = (r: Record<string, unknown>): EvidenceChunk => ({
+    chunkId: String(r.id),
+    productId: String(r.product_id),
+    productTitle: String(r.product_title),
+    body: String(r.body),
+    ratingBp: r.rating_bp != null ? Number(r.rating_bp) : null,
+    score: 1,
+  });
+
+  const best = rows.slice(0, Math.max(1, limit - 1)).map(toChunk);
+  const worst = toChunk(rows[rows.length - 1]);
+
+  // Only include the critical end when it is genuinely a different review and
+  // genuinely critical — on an all-five-star product there is nothing to
+  // balance, and inventing dissent is its own kind of dishonesty.
+  const chunks =
+    rows.length > best.length && (worst.ratingBp ?? 5000) < 4000
+      ? [worst, ...best].slice(0, limit)
+      : best.slice(0, limit);
+
+  return {
+    chunks,
+    total: Number(rows[0].total ?? rows.length),
+    averageBp: rows[0].average_bp != null ? Number(rows[0].average_bp) : null,
+  };
+}

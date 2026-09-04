@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { MessageCircle, Send } from "lucide-react";
 import { Button, Card, CardBody, Input } from "@/components/ui";
+import { StarDisplay } from "@/components/reviews/star-rating";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,7 +30,14 @@ export function ProductChat({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
-  const [turns, setTurns] = useState<{ role: "you" | "agent"; text: string }[]>([]);
+  const [turns, setTurns] = useState<
+    {
+      role: "you" | "agent";
+      text: string;
+      /** Real review sentences backing the reply, quoted verbatim. */
+      evidence?: { body: string; ratingBp: number | null }[];
+    }[]
+  >([]);
 
   async function ask(text: string) {
     const message = text.trim();
@@ -52,7 +60,10 @@ export function ProductChat({
         return;
       }
 
-      setTurns((t) => [...t, { role: "agent", text: data.reply }]);
+      setTurns((t) => [
+        ...t,
+        { role: "agent", text: data.reply, evidence: data.evidence ?? [] },
+      ]);
       if (data.variant?.variantId && data.variant.variantId !== currentVariantId) {
         onVariant(data.variant.variantId);
       }
@@ -63,7 +74,12 @@ export function ProductChat({
     }
   }
 
-  const suggestions = ["Do you have it in navy?", "What's the cheapest size?", "Is it breathable?"];
+  const suggestions = [
+    "What colours does it come in?",
+    "What are the reviews like?",
+    "Is it breathable?",
+    "What's the return policy?",
+  ];
 
   return (
     <Card>
@@ -99,6 +115,31 @@ export function ProductChat({
                       )}
                     >
                       {turn.text}
+
+                      {/*
+                        * Quotes come back separately from the reply, not baked
+                        * into it, so they can be rendered as what they are:
+                        * somebody else's words, verbatim, with their rating.
+                        * Asking "what are the reviews" returns the sample HERE
+                        * rather than in the sentence, so dropping this leaves
+                        * the agent saying "here are a few:" and then nothing.
+                        */}
+                      {turn.evidence && turn.evidence.length > 0 ? (
+                        <span className="mt-2 block space-y-2">
+                          {turn.evidence.map((quote, index) => (
+                            <span key={index} className="block border-l-2 border-border pl-2.5">
+                              <span className="block leading-relaxed">
+                                &ldquo;{quote.body}&rdquo;
+                              </span>
+                              {quote.ratingBp ? (
+                                <span className="mt-0.5 block">
+                                  <StarDisplay stars={quote.ratingBp / 1000} />
+                                </span>
+                              ) : null}
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
                     </span>
                   </li>
                 ))}

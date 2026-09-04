@@ -3,6 +3,7 @@ import { normalizeTypography } from "@/lib/text";
 import {
   evidenceByTopic,
   retrieveEvidence,
+  reviewSample,
   type EvidenceChunk,
 } from "@/server/catalog/evidence";
 import { formatMoney } from "@/lib/money";
@@ -352,6 +353,17 @@ async function answerFromProduct(
   const policy = answerAboutPolicy(product, question);
   if (policy) return { reply: policy, evidence: [] };
 
+  /*
+   * "What are some of the reviews?" is a question about the CONTAINER, and
+   * semantic retrieval cannot serve it: reviews talk about shoes, not about
+   * reviews, so it scores 0.311 against its own corpus where "is it
+   * comfortable" scores 0.553. The floor rejected it correctly and nine real
+   * reviews stayed unreachable. Asking for a sample needs a sample, not a
+   * search.
+   */
+  const reviews = await answerAboutReviews(product, question);
+  if (reviews) return reviews;
+
   const qualities = (product.attributes as { qualities?: Record<string, number> }).qualities ?? {};
   /*
    * Matches a shared PREFIX in either direction.
@@ -421,7 +433,7 @@ async function answerFromProduct(
       `${product.title} — ${formatMoney(variant.priceMinor, variant.currency)}, ` +
       `${variant.availableQuantity > 0 ? `${variant.availableQuantity} in stock` : "out of stock"}. ` +
       `${product.merchant.returnsAccepted ? `${product.merchant.returnWindowDays}-day returns` : "No returns"} ` +
-      `from ${product.merchant.name}.`,
+      `from ${product.merchant.name.replace(/\.$/, "")}.`,
     evidence: [],
   };
 }
@@ -500,4 +512,54 @@ function answerAboutPolicy(product: ProductDetail, question: string): string | n
   }
 
   return null;
+}
+
+/**
+ * A sample of the reviews, when the shopper asked for reviews rather than for
+ * an answer that reviews happen to contain.
+ *
+ * The shape of the request is what identifies it — a question naming the
+ * container ("reviews", "ratings", "what people say") rather than any product
+ * quality. Matched loosely so "review", "reviews" and "reviewed" all land.
+ */
+async function answerAboutReviews(
+  product: ProductDetail,
+  question: string,
+): Promise<{ reply: string; evidence: EvidenceChunk[] } | null> {
+  const words = wordsOf(question);
+  const asksForReviews =
+    // "rated" and "rating" share only three characters, so both stems are
+    // listed rather than loosening the prefix for everything.
+    words.some(
+      (w) =>
+        looselyMatches(w, "review") ||
+        looselyMatches(w, "rating") ||
+        looselyMatches(w, "rate") ||
+        looselyMatches(w, "star") ||
+        looselyMatches(w, "feedback") ||
+        looselyMatches(w, "opinion"),
+    ) ||
+    (words.some((w) => looselyMatches(w, "people") || looselyMatches(w, "buyers") ||
+      looselyMatches(w, "others") || looselyMatches(w, "customers")) &&
+      words.some((w) => looselyMatches(w, "said") || looselyMatches(w, "say") ||
+        looselyMatches(w, "think") || looselyMatches(w, "thought")));
+
+  if (!asksForReviews) return null;
+
+  const { chunks, total, averageBp } = await reviewSample(product.productId, 3).catch(() => ({
+    chunks: [] as EvidenceChunk[],
+    total: 0,
+    averageBp: null,
+  }));
+
+  if (chunks.length === 0) {
+    return { reply: `${product.title} has no reviews yet.`, evidence: [] };
+  }
+
+  const stars = averageBp ? (averageBp / 1000).toFixed(1) : null;
+  const summary = stars
+    ? `${product.title} averages ${stars}/5 across ${total} review${total === 1 ? "" : "s"}. Here are a few:`
+    : `Here are a few of the ${total} review${total === 1 ? "" : "s"} for ${product.title}:`;
+
+  return { reply: summary, evidence: chunks };
 }
