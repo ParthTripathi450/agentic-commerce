@@ -266,9 +266,28 @@ export function AutonomousFlow({
 
         // Understood enough — hand the synthesised instruction to the buyer.
         setHistory(nextHistory);
+        /*
+         * The same rule as the server's fallback: the instruction is the
+         * REQUEST, not every answer joined together.
+         *
+         * Joining them turned "looking for some formal shoes" plus the answers
+         * "9", "black" and "no budget limit" into a single search phrase in
+         * which "formal" was one term among many.
+         */
+        const beforeFirstQuestion = nextHistory.slice(
+          0,
+          nextHistory.findIndex((t) => t.role === "agent") === -1
+            ? nextHistory.length
+            : nextHistory.findIndex((t) => t.role === "agent"),
+        );
         const instruction =
           dto.intent?.productQuery ||
-          nextHistory.filter((t) => t.role === "shopper").map((t) => t.content).join(", ");
+          beforeFirstQuestion
+            .filter((t) => t.role === "shopper")
+            .map((t) => t.content)
+            .join(", ") ||
+          nextHistory.find((t) => t.role === "shopper")?.content ||
+          trimmed;
         setMessages((m) =>
           m.concat({
             role: "agent",

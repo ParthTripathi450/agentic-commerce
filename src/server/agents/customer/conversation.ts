@@ -3,7 +3,7 @@ import { toMinor } from "@/lib/money";
 import { normalizeTypography } from "@/lib/text";
 import { completeJson } from "@/server/ai/llm";
 import { getVocabulary } from "@/server/catalog/vocabulary";
-import { missingSlots, type SlotId } from "./clarify";
+import { missingSlots, stripRequestFiller, type SlotId } from "./clarify";
 import { wantsOutOfStock } from "./intent-rules";
 import { shoppingIntentSchema, type ShoppingIntent } from "./intent-schema";
 
@@ -166,12 +166,38 @@ function fallbackUnderstanding(
     .map((t) => t.content)
     .join(", ");
 
+  /*
+   * The search phrase is what they asked FOR, not everything they have said.
+   *
+   * Joining every shopper turn made the query a bag of answers: a shopper who
+   * said "looking for some formal shoes" and then answered "9", "black", "no
+   * budget limit" and "balanced" was searched for
+   * "looking for some formal shoes, 9, black, no budget limit" — in which
+   * "formal" is one term among several and the rest is noise. It returned
+   * Budget Running Shoes and Laceless Sneakers as runners-up for formal shoes.
+   *
+   * The rule is structural rather than a list of words to strip (§8.21): the
+   * agent asks a question BECAUSE it already has the request, so everything
+   * said before its first question is the request, and everything after it is
+   * an answer. Answers are constraints — they are already carried in `slots`,
+   * which is where a size or a colour belongs. Putting them in the phrase as
+   * well says them twice, and the second time as free text that competes with
+   * the product itself.
+   */
+  const firstQuestion = turns.findIndex((t) => t.role === "agent");
+  const requestText = stripRequestFiller(
+    (firstQuestion === -1 ? turns : turns.slice(0, firstQuestion))
+      .filter((t) => t.role === "shopper")
+      .map((t) => t.content)
+      .join(", ") || shopperText,
+  );
+
   const outstanding = missingSlots(intent).filter((s) => !askedSlots.includes(s.id));
   const next = outstanding[0];
 
   return {
     slots: {
-      productType: intent.productQuery || null,
+      productType: intent.productQuery || requestText || null,
       purpose: intent.category,
       size: intent.attributes.size ?? null,
       color: intent.attributes.color ?? null,
@@ -187,7 +213,7 @@ function fallbackUnderstanding(
     question: next ? next.question : null,
     questionAbout: next ? next.id : null,
     suggestions: next ? next.options.map((o) => o.label).slice(0, 6) : [],
-    searchPhrase: shopperText,
+    searchPhrase: requestText,
     priority: intent.priority,
     qualityConstraints: [],
   };

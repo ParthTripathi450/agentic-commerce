@@ -256,10 +256,42 @@ export async function runShoppingTurn(input: {
     ...(input.history ?? []),
     { role: "shopper", content: input.message },
   ];
+  /*
+   * Everything they said, for RULE EXTRACTION only.
+   *
+   * Size, colour and budget are parsed out of this, which needs the answers.
+   */
   const shopperText = turns
     .filter((t) => t.role === "shopper")
     .map((t) => t.content)
     .join(", ");
+
+  /*
+   * What they actually asked FOR — which is not the same thing, and conflating
+   * the two was a disaster.
+   *
+   * The fallback used `shopperText` as the search query, so a shopper who said
+   * "looking for some formal shoes" and then answered "9", "black", "no budget
+   * limit" and "balanced" was searched for
+   * "looking for some formal shoes, 9, black, no budget limit" — a bag of words
+   * in which "formal" is one term among many. It returned Budget Running Shoes
+   * and Laceless Sneakers as runners-up for a formal shoe request.
+   *
+   * The rule is structural, not a list of words to ignore (§8.21): the agent
+   * asks questions precisely BECAUSE it already has the request, so everything
+   * said before its first question is the request and everything after is an
+   * answer to something we asked. Answers are constraints — they belong in
+   * `attributes`, where the rule parser puts them, never in the query text.
+   *
+   * This matters because the fallback is a NORMAL path (§8.13): a free tier
+   * runs out, and when it does the query must still be about the right thing.
+   */
+  const firstQuestion = turns.findIndex((t) => t.role === "agent");
+  const requestText =
+    (firstQuestion === -1 ? turns : turns.slice(0, firstQuestion))
+      .filter((t) => t.role === "shopper")
+      .map((t) => t.content)
+      .join(", ") || input.message;
 
   /*
    * The fallback intent is parsed by the RULES, not left empty.
@@ -272,11 +304,22 @@ export async function runShoppingTurn(input: {
   const understanding = await understandConversation({
     turns,
     askedSlots: answered,
-    fallbackIntent: parseIntentWithRules(shopperText || input.message, await getVocabulary()),
+    /*
+     * Attributes from everything they said; the QUERY from the request alone.
+     *
+     * The rule parser needs the answers to find size 9 and black, but its
+     * `productQuery` is whatever text it was handed — which is how the answers
+     * ended up in the search phrase. Both come from this one call, so the query
+     * is corrected here rather than by parsing twice.
+     */
+    fallbackIntent: {
+      ...parseIntentWithRules(shopperText || input.message, await getVocabulary()),
+      productQuery: requestText,
+    },
     knownAboutShopper: knowledge ? describeKnowledge(knowledge) : undefined,
   });
 
-  const intent = intentFromUnderstanding(understanding, shopperText);
+  const intent = intentFromUnderstanding(understanding, requestText);
   const degraded = understanding.degraded;
   const intentMeta = understanding.meta;
 

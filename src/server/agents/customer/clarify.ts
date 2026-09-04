@@ -107,6 +107,23 @@ const PRODUCT_NOUNS = new Set([
   "thing", "things", "something",
 ]);
 
+/**
+ * Drops the request preamble, keeping what was actually asked for.
+ *
+ * "looking for some formal shoes" -> "formal shoes". Product nouns are
+ * deliberately KEPT — unlike `hasStatedPurpose`, which strips them because it
+ * is asking whether anything else was said. Here "shoes" is the request.
+ *
+ * Only the deterministic fallback needs this: when the model is reachable it
+ * writes a clean phrase itself. But the fallback is a normal path on a free
+ * tier (§8.13), and there the raw sentence is what reaches retrieval — where
+ * "looking" and "some" are terms competing with "formal".
+ */
+export function stripRequestFiller(text: string): string {
+  const kept = (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => !FILLER.has(w));
+  return kept.length > 0 ? kept.join(" ") : text.trim();
+}
+
 export function hasStatedPurpose(text: string): boolean {
   const words = text
     .toLowerCase()

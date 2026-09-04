@@ -302,6 +302,29 @@ Three rules keep it safe:
 Scored on the share of the QUERY's words accounted for, so a long marketing sentence cannot outscore
 a precise one by length.
 
+### Answers are constraints, never search terms
+A shopper asking for formal shoes was shown Budget Running Shoes and Laceless Sneakers. Three
+independent defects, each sufficient on its own, and all three visible only on the DEGRADED path —
+which is a normal path on a free tier (§8.13), not an edge case.
+
+1. **The query accumulated every answer.** `fallbackUnderstanding` joined all shopper turns, so
+   "looking for some formal shoes" plus the answers "9", "black" and "no budget limit" became the
+   search phrase `"looking for some formal shoes, 9, black, no budget limit"` — a bag of words in
+   which "formal" is one term among several. The rule is structural, not a list of words to strip:
+   **the agent asks a question BECAUSE it already has the request**, so everything said before its
+   first question is the request and everything after is an answer. Answers already live in `slots`;
+   repeating them as free text makes them compete with the product itself.
+2. **The preamble was searched too.** `stripRequestFiller()` reuses `clarify.ts`'s existing FILLER
+   set, so "looking for some formal shoes" retrieves as "formal shoes". Product nouns are KEPT here,
+   unlike `hasStatedPurpose`, because "shoes" is the request.
+3. **"No budget limit" selected the `cheapest` preset**, because the rule matched the word "budget"
+   without its negation — and `cheapest` set relevance to 0.12 against price 0.58. A product named
+   "Budget Running Shoes" then scored 0.021 on relevance and lost almost nothing for it.
+
+**Every preset now gives relevance the same 0.22**, and only the preferences differ. Choosing
+"cheapest" means the cheapest OF THE RIGHT THING; no preset is a licence to return something else.
+That is the same line `SHOPPER_CRITERIA` draws by leaving relevance out of the reorderable list.
+
 ### Shopper-controlled ranking (`ranker.ts` + `priority-editor.tsx`)
 The weights are **shown, not hidden** — a ranking whose priorities are invisible cannot be argued
 with. `SHOPPER_CRITERIA` (price, rating, delivery, returns, reliability, availability) can be

@@ -41,6 +41,22 @@ function matchAmount(text: string, patterns: RegExp[]): number | null {
 
 function detectPriority(text: string): Priority {
   const t = text.toLowerCase();
+  /*
+   * "No budget limit" is the OPPOSITE of "cheapest", and reading it as the
+   * word "budget" was a disaster.
+   *
+   * A shopper who said "looking for some formal shoes" and then answered the
+   * spend question with "no budget limit" was switched to the `cheapest`
+   * preset — which drops relevance to 0.12 and raises price to 0.58. A product
+   * called "Budget Running Shoes" then outranked actual formal shoes on price
+   * alone, with its 0.021 relevance barely counting against it.
+   *
+   * Negation is checked first and by shape, not by listing every phrasing:
+   * a negator anywhere in the few words before the money word cancels it.
+   */
+  if (/\b(no|not|any|without|unlimited|isn'?t|dont|don't)\b[^.]{0,20}\b(budget|limit|price|spend|cost)\b/.test(t))
+    return "balanced";
+
   if (/\b(cheapest|cheap|budget|lowest price|affordable|least expensive|save money)\b/.test(t))
     return "cheapest";
   if (/\b(fastest|urgent|asap|quickly|soonest|today|tomorrow|next day|immediately)\b/.test(t))
