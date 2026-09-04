@@ -167,7 +167,27 @@ export const orders = pgTable(
     totals: jsonb("totals").$type<Totals>().notNull(),
     /** Non-null when an AI agent placed this order — powers agent-vs-human analytics. */
     agentSessionId: varchar("agent_session_id", { length: 36 }),
-    placedByAgent: varchar("placed_by_agent", { length: 160 }),
+    /**
+   * Where this order actually shipped, copied at checkout.
+   *
+   * A SNAPSHOT, not a reference to `addresses`. The same reason
+   * `order_items` snapshots its title and SKU: an order is a record of what
+   * happened, and it has to keep saying where it went after the shopper edits
+   * that address or deletes it. A foreign key would let a delivered order
+   * quietly rewrite its own history.
+   */
+  shippingAddress: jsonb("shipping_address").$type<{
+    label?: string;
+    recipient: string;
+    phone?: string | null;
+    line1: string;
+    line2?: string | null;
+    city: string;
+    state: string;
+    postcode: string;
+    country: string;
+  } | null>(),
+  placedByAgent: varchar("placed_by_agent", { length: 160 }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

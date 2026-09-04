@@ -85,6 +85,47 @@ export default function RegisterPage() {
 
         <PasswordField serverError={state.fieldErrors?.password} />
 
+        {/*
+          * The address, optional but all-or-nothing.
+          *
+          * Asking for it here saves a shopper filling it in mid-checkout, where
+          * abandoning is easiest. Skipping is allowed — a half-entered address
+          * is worse than none, because checkout would offer it and then fail on
+          * the missing postcode, so the server rejects partial ones rather than
+          * storing something undeliverable.
+          */}
+        <fieldset className="space-y-3 rounded-lg border border-border p-3">
+          <legend className="px-1 text-xs font-medium text-muted-foreground">
+            {role === "merchant" ? "Where you dispatch from" : "Delivery address"} — optional, you
+            can add it later
+          </legend>
+
+          <Field label="Street address" hint={state.fieldErrors?.line1}>
+            <Input name="line1" placeholder="12 MG Road" />
+          </Field>
+          <Field label="Flat, floor, landmark" hint={state.fieldErrors?.line2}>
+            <Input name="line2" placeholder="Flat 4B" />
+          </Field>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="City" hint={state.fieldErrors?.city}>
+              <Input name="city" placeholder="Bengaluru" />
+            </Field>
+            <Field label="State" hint={state.fieldErrors?.state}>
+              <Input name="state" placeholder="Karnataka" />
+            </Field>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Postcode" hint={state.fieldErrors?.postcode}>
+              <Input name="postcode" inputMode="numeric" placeholder="560001" />
+            </Field>
+            <Field label="Phone" hint={state.fieldErrors?.phone}>
+              <Input name="phone" type="tel" placeholder="+91 98765 43210" />
+            </Field>
+          </div>
+        </fieldset>
+
         <Button type="submit" size="lg" className="w-full" disabled={pending}>
           {pending ? "Creating account…" : "Create account"}
         </Button>

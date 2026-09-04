@@ -23,6 +23,8 @@ export type CartLine = {
   title: string;
   sku: string;
   attributes: Record<string, string>;
+  /** Carried so a category-scoped promotion can tell which lines it covers. */
+  category: string;
   quantity: number;
   /** Price captured when the item was added. */
   unitPriceMinor: number;
@@ -136,7 +138,26 @@ export async function removeFromCart(cartId: string, variantId: string) {
     .where(and(eq(cartItems.cartId, cartId), eq(cartItems.variantId, variantId)));
 }
 
-async function resolvePromotion(merchantId: string, code: string | undefined, subtotalMinor: number) {
+/**
+ * Finds a promotion the cart genuinely qualifies for.
+ *
+ * Three conditions, and only the first was being checked. `conditions.categories`
+ * and the `activeFrom`/`activeTo` window both existed in the schema and were
+ * ignored entirely, so a promotion created as "20% off shoes, ends Friday"
+ * discounted everything in the cart, forever. A merchant setting a scope and
+ * watching it not apply is worse than not offering the field.
+ *
+ * The category test is on the ELIGIBLE subtotal, not the whole cart: a shoes
+ * promotion on a basket of shoes and a kettle should discount the shoes. That
+ * is what a shopper reads it as, and discounting the kettle too would be the
+ * merchant paying for something they did not offer.
+ */
+async function resolvePromotion(
+  merchantId: string,
+  code: string | undefined,
+  subtotalMinor: number,
+  categoriesInCart: { category: string; subtotalMinor: number }[] = [],
+) {
   if (!code) return null;
   const [promotion] = await db
     .select()
@@ -151,9 +172,27 @@ async function resolvePromotion(merchantId: string, code: string | undefined, su
     .limit(1);
   if (!promotion) return null;
 
+  // A promotion outside its window is not a promotion. `active` is the
+  // merchant's switch; the dates are the offer's own terms.
+  const now = new Date();
+  if (promotion.activeFrom && promotion.activeFrom > now) return null;
+  if (promotion.activeTo && promotion.activeTo < now) return null;
+
+  const scoped = promotion.conditions?.categories ?? [];
+  const eligibleMinor =
+    scoped.length === 0
+      ? subtotalMinor
+      : categoriesInCart
+          .filter((c) => scoped.includes(c.category))
+          .reduce((sum, c) => sum + c.subtotalMinor, 0);
+
+  // Nothing in the cart is what the offer is for.
+  if (scoped.length > 0 && eligibleMinor === 0) return null;
+
   const minimum = promotion.conditions?.minSubtotalMinor ?? 0;
-  if (subtotalMinor < minimum) return null;
-  return promotion;
+  if (eligibleMinor < minimum) return null;
+
+  return { ...promotion, eligibleMinor };
 }
 
 /**
@@ -201,6 +240,8 @@ export async function loadCart(cartId: string, promoCode?: string): Promise<Cart
       sku: variant.sku,
       attributes: variant.attributes,
       quantity: item.quantity,
+      // Carried so a category-scoped promotion can tell which lines it covers.
+      category: product.category,
       unitPriceMinor: item.unitPriceMinor,
       currentPriceMinor: variant.priceMinor,
       availableQuantity: Number(available),
@@ -233,13 +274,31 @@ export async function loadCart(cartId: string, promoCode?: string): Promise<Cart
 
   // Totals always use the CURRENT price — never a stale captured one.
   const subtotalMinor = lines.reduce((sum, l) => sum + l.currentPriceMinor * l.quantity, 0);
-  const promotion = await resolvePromotion(cart.merchantId, promoCode, subtotalMinor);
+
+  const byCategory = new Map<string, number>();
+  for (const line of lines) {
+    byCategory.set(
+      line.category,
+      (byCategory.get(line.category) ?? 0) + line.currentPriceMinor * line.quantity,
+    );
+  }
+
+  const promotion = await resolvePromotion(
+    cart.merchantId,
+    promoCode,
+    subtotalMinor,
+    [...byCategory].map(([category, minor]) => ({ category, subtotalMinor: minor })),
+  );
 
   let discountMinor = 0;
   let freeShipping = false;
   if (promotion) {
-    if (promotion.type === "percentage_off") discountMinor = applyBp(subtotalMinor, promotion.value);
-    else if (promotion.type === "flat_off") discountMinor = Math.min(promotion.value, subtotalMinor);
+    // Scoped promotions discount only the lines they cover — see the note on
+    // `resolvePromotion`. An unscoped one covers the whole cart, so
+    // `eligibleMinor` equals the subtotal and this reads identically.
+    const base = promotion.eligibleMinor;
+    if (promotion.type === "percentage_off") discountMinor = applyBp(base, promotion.value);
+    else if (promotion.type === "flat_off") discountMinor = Math.min(promotion.value, base);
     else if (promotion.type === "free_shipping") freeShipping = true;
   }
 

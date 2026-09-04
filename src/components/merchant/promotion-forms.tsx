@@ -12,7 +12,7 @@ import {
 
 type State = { ok?: boolean; message?: string; error?: string } | null;
 
-export function CreatePromotionForm() {
+export function CreatePromotionForm({ categories }: { categories: string[] }) {
   const [state, action, pending] = useActionState<State, FormData>(createPromotionAction, null);
   const [type, setType] = useState("percentage_off");
 
@@ -62,6 +62,34 @@ export function CreatePromotionForm() {
             <Input name="activeTo" type="date" />
           </Field>
 
+          {/*
+            * Which categories the offer covers.
+            *
+            * Read from this merchant's own catalogue rather than a fixed list:
+            * scoping a promotion to something they do not stock would never
+            * apply and they would have no way to tell why.
+            */}
+          {categories.length > 0 ? (
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-medium text-muted-foreground">
+                Which products? Leave all unticked to cover your whole catalogue.
+              </legend>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {categories.map((category) => (
+                  <label key={category} className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      name="categories"
+                      value={category}
+                      className="size-4 accent-primary"
+                    />
+                    {category}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
+
           <Button type="submit" disabled={pending}>
             {pending ? "Creating…" : "Create promotion"}
           </Button>
@@ -84,6 +112,7 @@ export function PromotionRow({
     activeTo: string | null;
     createdByAgent: boolean;
     minSubtotalMinor: number | null;
+    categories: string[];
   };
 }) {
   const router = useRouter();
@@ -125,6 +154,19 @@ export function PromotionRow({
           {amount}
           {promotion.minSubtotalMinor ? ` · orders above ${formatMoney(promotion.minSubtotalMinor)}` : ""}
           {promotion.activeTo ? ` · until ${new Date(promotion.activeTo).toLocaleDateString("en-IN")}` : ""}
+          {promotion.categories.length > 0
+            ? ` · ${promotion.categories.join(", ")} only`
+            : " · whole catalogue"}
+          {/*
+            * Days remaining, spelled out.
+            *
+            * "until 12/09/2026" makes a shopper do the arithmetic; "ends in 3
+            * days" is the thing they actually want to know, and it is what
+            * decides whether they buy today.
+            */}
+          {daysLeft(promotion.activeTo) !== null && !expired
+            ? ` · ends in ${daysLeft(promotion.activeTo)} day${daysLeft(promotion.activeTo) === 1 ? "" : "s"}`
+            : ""}
         </p>
         {error ? <p className="mt-0.5 text-xs text-danger">{error}</p> : null}
       </div>
@@ -149,4 +191,13 @@ export function PromotionRow({
       </div>
     </div>
   );
+}
+
+/** Whole days from now until a promotion stops, or null if it never does. */
+export function daysLeft(activeTo: string | null): number | null {
+  if (!activeTo) return null;
+  const ms = new Date(activeTo).getTime() - Date.now();
+  if (ms < 0) return 0;
+  // Rounded UP: an offer with six hours left has one day left, not zero.
+  return Math.ceil(ms / 86_400_000);
 }

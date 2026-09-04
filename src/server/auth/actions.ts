@@ -7,7 +7,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { agentPolicies, merchantPolicies, merchants, users } from "@/db/schema";
 import { signIn } from "@/lib/auth";
-import { validateRegistration } from "@/lib/registration";
+import { isCompleteAddress, validateRegistration } from "@/lib/registration";
+import { addAddress } from "@/server/commerce/addresses";
 import { getOrCreateSigningKey } from "@/server/protocols/ap2/keys";
 
 export type ActionState = { error?: string; fieldErrors?: Record<string, string> };
@@ -49,7 +50,10 @@ export async function registerAction(
     }
     // A validation failure must never be invisible: if it lands on a field this
     // form does not render, promote it to the top-level error banner.
-    const visible = new Set(["name", "email", "password", "storeName"]);
+    const visible = new Set([
+      "name", "email", "password", "storeName",
+      "line1", "line2", "city", "state", "postcode", "phone",
+    ]);
     const orphaned = Object.entries(fieldErrors).find(([key]) => !visible.has(key));
     return {
       fieldErrors,
@@ -57,7 +61,7 @@ export async function registerAction(
     };
   }
 
-  const { name, email, password, role, storeName } = parsed.data;
+  const { name, email, password, role, storeName, ...address } = parsed.data;
   const normalisedEmail = email.toLowerCase();
 
   try {
@@ -74,6 +78,25 @@ export async function registerAction(
     .values({ name, email: normalisedEmail, passwordHash: await hash(password, 10), role })
     .returning();
 
+  /*
+   * The address, when they gave one.
+   *
+   * Written through `addAddress` rather than inserted here, so the "first one
+   * is the default" rule lives in one place — a shopper whose only address is
+   * not the default gets a checkout that offers them nothing.
+   */
+  if (isCompleteAddress(address)) {
+    await addAddress(user.id, {
+      recipient: name,
+      phone: address.phone ?? null,
+      line1: address.line1!,
+      line2: address.line2 ?? null,
+      city: address.city!,
+      state: address.state!,
+      postcode: address.postcode!,
+    });
+  }
+
   if (role === "merchant") {
     const [merchant] = await db
       .insert(merchants)
@@ -82,6 +105,19 @@ export async function registerAction(
         slug: await uniqueSlug(slugify(storeName!)),
         name: storeName!.trim(),
         supportEmail: normalisedEmail,
+        // A merchant dispatches from somewhere; the same address they signed
+        // up with, unless and until they change it.
+        address: isCompleteAddress(address)
+          ? {
+              line1: address.line1!,
+              line2: address.line2 ?? null,
+              city: address.city!,
+              state: address.state!,
+              postcode: address.postcode!,
+              country: "India",
+              phone: address.phone ?? null,
+            }
+          : null,
       })
       .returning();
 

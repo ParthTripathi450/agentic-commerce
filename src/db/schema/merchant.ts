@@ -30,6 +30,22 @@ export const merchants = pgTable("merchants", {
   fulfillmentRate: integer("fulfillment_rate_bp").notNull().default(9500),
   avgDispatchHours: integer("avg_dispatch_hours").notNull().default(24),
 
+  /**
+   * Where the merchant dispatches from.
+   *
+   * A marketplace where nobody has an address cannot state a delivery estimate
+   * honestly, and a shopper deciding between two sellers is entitled to know
+   * whether one of them is in the same city.
+   */
+  address: jsonb("address").$type<{
+    line1: string;
+    line2?: string | null;
+    city: string;
+    state: string;
+    postcode: string;
+    country: string;
+    phone?: string | null;
+  } | null>(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

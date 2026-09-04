@@ -14,11 +14,42 @@ export const registerSchema = z
     password: z.string().min(8, "Use at least 8 characters"),
     role: z.enum(["customer", "merchant"]),
     storeName: z.string().max(160).optional(),
+    /*
+     * A delivery address, collected at sign-up.
+     *
+     * Optional as a group but all-or-nothing: a half-entered address is worse
+     * than none, because checkout would offer it and then fail on a missing
+     * postcode. The refine below enforces that.
+     */
+    line1: z.string().max(200).optional(),
+    line2: z.string().max(200).optional(),
+    city: z.string().max(80).optional(),
+    state: z.string().max(80).optional(),
+    postcode: z.string().max(16).optional(),
+    phone: z.string().max(24).optional(),
   })
   .refine((v) => v.role !== "merchant" || (v.storeName?.trim().length ?? 0) >= 2, {
     message: "Store name is required for a merchant account",
     path: ["storeName"],
+  })
+  .refine((v) => !hasAnyAddressField(v) || isCompleteAddress(v), {
+    message: "Add the street, city, state and postcode, or leave the address blank for now",
+    path: ["line1"],
   });
+
+/** Did they start filling the address in at all? */
+export function hasAnyAddressField(v: {
+  line1?: string; line2?: string; city?: string; state?: string; postcode?: string;
+}): boolean {
+  return Boolean(v.line1 || v.line2 || v.city || v.state || v.postcode);
+}
+
+/** Enough to actually deliver to. */
+export function isCompleteAddress(v: {
+  line1?: string; city?: string; state?: string; postcode?: string;
+}): boolean {
+  return Boolean(v.line1 && v.city && v.state && v.postcode);
+}
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 
@@ -43,5 +74,12 @@ export function validateRegistration(formData: FormData) {
     password: formData.get("password"),
     role: formData.get("role"),
     storeName: optionalField(formData, "storeName"),
+    // Every one read through `optionalField`, for the reason above it.
+    line1: optionalField(formData, "line1"),
+    line2: optionalField(formData, "line2"),
+    city: optionalField(formData, "city"),
+    state: optionalField(formData, "state"),
+    postcode: optionalField(formData, "postcode"),
+    phone: optionalField(formData, "phone"),
   });
 }

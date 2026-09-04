@@ -64,6 +64,13 @@
       "when": 1788435520567,
       "tag": "0008_modern_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788533277614,
+      "tag": "0009_shallow_chamber",
+      "breakpoints": true
     }
   ]
 }

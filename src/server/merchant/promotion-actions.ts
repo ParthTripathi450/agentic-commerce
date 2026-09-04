@@ -23,6 +23,14 @@ const createSchema = z.object({
   value: z.coerce.number().min(0).max(1_000_000),
   minSubtotal: z.coerce.number().min(0).max(10_000_000).optional(),
   activeTo: z.string().optional(),
+  /**
+   * Which categories the offer covers. Empty means the whole catalogue.
+   *
+   * Scoping was in the schema and ignored by the cart, so a merchant could set
+   * "shoes only" and watch it discount everything. `resolvePromotion` honours
+   * it now, which is what makes offering the field honest.
+   */
+  categories: z.array(z.string().max(120)).max(20).default([]),
 });
 
 export async function createPromotionAction(_prev: unknown, formData: FormData) {
@@ -34,6 +42,7 @@ export async function createPromotionAction(_prev: unknown, formData: FormData) 
     value: formData.get("value"),
     minSubtotal: formData.get("minSubtotal") || undefined,
     activeTo: formData.get("activeTo") || undefined,
+    categories: formData.getAll("categories").filter((c): c is string => typeof c === "string"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Check the fields and try again." };
@@ -69,7 +78,10 @@ export async function createPromotionAction(_prev: unknown, formData: FormData) 
         : data.type === "flat_off"
           ? toMinor(data.value)
           : 0,
-    conditions: data.minSubtotal ? { minSubtotalMinor: toMinor(data.minSubtotal) } : {},
+    conditions: {
+      ...(data.minSubtotal ? { minSubtotalMinor: toMinor(data.minSubtotal) } : {}),
+      ...(data.categories.length > 0 ? { categories: data.categories } : {}),
+    },
     active: true,
     activeFrom: new Date(),
     activeTo: data.activeTo ? new Date(data.activeTo) : null,
