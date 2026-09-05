@@ -29,6 +29,7 @@
     "recovery:demo": "tsx --env-file=.env.local src/scripts/recovery-demo.ts",
     "recovery:fast-forward": "tsx --env-file=.env.local src/scripts/recovery-fast-forward.ts",
     "support:demo": "tsx --env-file=.env.local src/scripts/support-demo.ts",
+    "recovery:simulate": "tsx --env-file=.env.local src/scripts/recovery-simulate.ts",
     "db:seed-recovery-demo": "tsx --env-file=.env.local src/db/seed-recovery-demo.ts",
     "db:backfill-addresses": "tsx --env-file=.env.local src/db/backfill-addresses.ts",
     "db:seed-personas": "tsx --env-file=.env.local src/db/seed-personas.ts",
