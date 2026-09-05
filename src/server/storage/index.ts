@@ -83,7 +83,17 @@ class SupabaseDriver implements StorageDriver {
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? "product-images";
     if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
-    return { url: url.replace(/\/$/, ""), key, bucket };
+    /*
+     * Accept the URL the dashboard actually hands you.
+     *
+     * Supabase shows a "RESTful API" URL ending in /rest/v1/ alongside the bare
+     * project URL, and pasting the wrong one sends storage calls to PostgREST,
+     * which answers 404 PGRST125 — an error about a database path, for an
+     * upload. Trimming the known service suffixes here costs nothing and turns
+     * a confusing failure into no failure.
+     */
+    const base = url.replace(/\/+$/, "").replace(/\/(rest|storage|auth|realtime)\/v1$/, "");
+    return { url: base, key, bucket };
   }
 
   async put(key: string, bytes: Uint8Array, contentType: string): Promise<StoredFile> {
@@ -91,6 +101,16 @@ class SupabaseDriver implements StorageDriver {
     const response = await fetch(`${url}/storage/v1/object/${bucket}/${key}`, {
       method: "POST",
       headers: {
+        /*
+         * BOTH headers, and both are required.
+         *
+         * Supabase puts an API gateway in front of Storage, and the gateway
+         * authenticates on `apikey` while Storage itself authorises on the
+         * bearer token. Sending only the bearer gets you a 401 from the gateway
+         * that never reaches Storage — "No API key found in request" — which
+         * reads like a bad key rather than a missing header.
+         */
+        apikey: token,
         Authorization: `Bearer ${token}`,
         "Content-Type": contentType,
         "x-upsert": "true",
@@ -108,7 +128,7 @@ class SupabaseDriver implements StorageDriver {
     const { url, key: token, bucket } = this.config();
     await fetch(`${url}/storage/v1/object/${bucket}/${key}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { apikey: token, Authorization: `Bearer ${token}` },
     }).catch(() => undefined);
   }
 }
