@@ -77,9 +77,12 @@ const SCENARIO: Record<string, string> = {
 export function RecoveryBoard({
   metrics,
   cases,
+  filters,
 }: {
   metrics: BoardMetrics;
   cases: BoardCase[];
+  /** Rendered by the page, which owns the URL the filters live in. */
+  filters?: React.ReactNode;
 }) {
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string | null>(null);
@@ -135,10 +138,12 @@ export function RecoveryBoard({
         </CardBody>
       </Card>
 
+      {filters ? <Card><CardBody>{filters}</CardBody></Card> : null}
+
       {cases.length === 0 ? (
-        <EmptyState title="No revenue at risk found">
-          Run a sweep to look for failed payments, abandoned baskets and shoppers whose payments keep
-          failing.
+        <EmptyState title="Nothing matches">
+          Either nothing is at risk, or these filters are too narrow. Clear them, or run a sweep to
+          look for failed payments, abandoned baskets and shoppers whose payments keep failing.
         </EmptyState>
       ) : (
         <div className="space-y-3">

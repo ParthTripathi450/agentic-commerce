@@ -2,7 +2,8 @@ import { PageHeader } from "@/components/page-header";
 import { RecoveryBoard, type BoardCase } from "@/components/merchant/recovery-board";
 import { requireMerchant } from "@/lib/session";
 import { recoveryMetrics } from "@/server/agents/recovery/agent";
-import { listCases, timelinesFor } from "@/server/agents/recovery/queries";
+import { RecoveryFilters } from "@/components/merchant/recovery-filters";
+import { listCases, summarise, timelinesFor } from "@/server/agents/recovery/queries";
 
 /**
  * Revenue recovery, for the merchant.
@@ -12,13 +13,46 @@ import { listCases, timelinesFor } from "@/server/agents/recovery/queries";
  * came back — and shows the reasoning behind every case rather than only its
  * verdict.
  */
-export default async function RecoveryPage() {
+type Params = Record<string, string | string[] | undefined>;
+
+/**
+ * Query strings are user input like any other.
+ *
+ * A bad number is dropped rather than reaching SQL as NaN, which would silently
+ * match nothing and read as "you have no cases" — the worst possible lie for
+ * this particular page to tell.
+ */
+const CASE_STATES = new Set([
+  "detected", "diagnosed", "awaiting_approval", "acting",
+  "verifying", "recovered", "stopped", "escalated", "expired",
+]);
+
+function parseFilters(params: Params) {
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || undefined;
+  const num = (v: string | string[] | undefined) => {
+    const n = Number(one(v));
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
+  };
+  return {
+    q: one(params.q)?.slice(0, 120),
+    minAmountMinor: num(params.min),
+    withinHours: num(params.within),
+    // `state` is compared against a Postgres ENUM, so an unrecognised value
+    // does not return nothing — it raises. Unknown states are dropped.
+    state: CASE_STATES.has(one(params.state) ?? "") ? one(params.state) : undefined,
+  };
+}
+
+export default async function RecoveryPage({ searchParams }: { searchParams: Promise<Params> }) {
   const { merchant } = await requireMerchant();
+  const filters = parseFilters(await searchParams);
+
   const [metrics, cases, timelines] = await Promise.all([
     recoveryMetrics(merchant.id),
-    listCases(merchant.id),
+    listCases(merchant.id, filters),
     timelinesFor(merchant.id),
   ]);
+  const shown = summarise(cases);
 
   const board: BoardCase[] = cases.map((c) => {
     const diagnosis = (c.evidence as { diagnosis?: { summary?: string; basis?: string[] } })
@@ -49,7 +83,17 @@ export default async function RecoveryPage() {
         title="Revenue recovery"
         description="Failed payments, abandoned baskets and shoppers whose payments keep failing — found, diagnosed and worked within limits you set. Revenue is only counted once a payment is actually captured."
       />
-      <RecoveryBoard metrics={metrics} cases={board} />
+      <RecoveryBoard
+        metrics={metrics}
+        cases={board}
+        filters={
+          <RecoveryFilters
+            shown={shown.shown}
+            atRiskMinor={shown.atRiskMinor}
+            recoveredMinor={shown.recoveredMinor}
+          />
+        }
+      />
     </div>
   );
 }

@@ -10,13 +10,64 @@ export type CaseRow = typeof recoveryCases.$inferSelect & {
   shopperEmail: string;
 };
 
-export async function listCases(merchantId: string, limit = 50): Promise<CaseRow[]> {
+/**
+ * How a merchant narrows the board.
+ *
+ * Money and time because those are the two axes a merchant triages on — the
+ * biggest first, and whatever happened since they last looked. Name because
+ * once a shopper replies to a recovery message, the merchant is looking for
+ * that person, not scrolling for their basket.
+ */
+export type CaseFilters = {
+  /** Matches the shopper's name, email, or the order number. */
+  q?: string;
+  minAmountMinor?: number;
+  maxAmountMinor?: number;
+  /** Cases detected within this many hours. */
+  withinHours?: number;
+  state?: string;
+};
+
+export async function listCases(
+  merchantId: string,
+  filters: CaseFilters = {},
+  limit = 100,
+): Promise<CaseRow[]> {
+  const where = [sql`rc.merchant_id = ${merchantId}`];
+
+  if (filters.q) {
+    /*
+     * One box, three fields.
+     *
+     * A merchant looking someone up has whichever of these they happen to hold
+     * — a name from a support reply, an address from an email, an order number
+     * from a receipt — and making them choose the right box first is friction
+     * with no information in it.
+     */
+    const like = `%${filters.q}%`;
+    where.push(
+      sql`(u.name ILIKE ${like} OR u.email ILIKE ${like} OR COALESCE(o.order_number, '') ILIKE ${like})`,
+    );
+  }
+  if (filters.minAmountMinor != null) {
+    where.push(sql`rc.amount_at_risk_minor >= ${filters.minAmountMinor}`);
+  }
+  if (filters.maxAmountMinor != null) {
+    where.push(sql`rc.amount_at_risk_minor <= ${filters.maxAmountMinor}`);
+  }
+  if (filters.withinHours != null) {
+    where.push(sql`rc.created_at > now() - (${filters.withinHours} * interval '1 hour')`);
+  }
+  if (filters.state) {
+    where.push(sql`rc.state = ${filters.state}`);
+  }
+
   const rows = (await db.execute(sql`
     SELECT rc.*, o.order_number, u.name AS shopper_name, u.email AS shopper_email
     FROM recovery_cases rc
     LEFT JOIN orders o ON o.id = rc.order_id
     JOIN users u ON u.id = rc.user_id
-    WHERE rc.merchant_id = ${merchantId}
+    WHERE ${sql.join(where, sql` AND `)}
     ORDER BY
       -- Live cases first, then by money: the merchant's attention is the
       -- scarce resource this page is spending.
@@ -89,6 +140,25 @@ export async function timelinesFor(
     byCase.set(caseId, [...(byCase.get(caseId) ?? []), entry]);
   }
   return byCase;
+}
+
+/**
+ * The totals for whatever is currently filtered.
+ *
+ * Separate from `recoveryMetrics`, which always describes the whole merchant:
+ * a merchant who has filtered to "over ₹10,000 in the last day" wants to know
+ * what THAT is worth, and showing the unfiltered total beside a filtered list
+ * invites reading one as the other.
+ */
+export function summarise(cases: CaseRow[]) {
+  const live = cases.filter(
+    (c) => !["recovered", "stopped", "escalated", "expired"].includes(c.state),
+  );
+  return {
+    shown: cases.length,
+    atRiskMinor: live.reduce((sum, c) => sum + c.amountAtRiskMinor, 0),
+    recoveredMinor: cases.reduce((sum, c) => sum + c.recoveredMinor, 0),
+  };
 }
 
 /**

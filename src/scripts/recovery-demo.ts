@@ -42,10 +42,18 @@ async function main() {
   // ------------------------------------------------------------- setup
   heading("SETUP", "A controlled batch of revenue at risk");
 
+  // The same merchant the seed plants into, resolved the same way — naming one
+  // here by hand is how the demo ended up reporting on an empty board.
   const [merchant] = (await q(sql`
     SELECT m.id, m.name, m.user_id, u.email
-    FROM merchants m JOIN users u ON u.id = m.user_id
-    WHERE m.name = 'Sole Republic' LIMIT 1
+    FROM merchants m
+    JOIN users u ON u.id = m.user_id
+    JOIN products p ON p.merchant_id = m.id AND p.status = 'active'
+    WHERE m.status = 'active'
+    GROUP BY m.id, u.email
+    HAVING COUNT(*) > 3
+    ORDER BY (u.email = 'care@stride.test') DESC
+    LIMIT 1
   `)) as unknown as { id: string; name: string; user_id: string; email: string }[];
   if (!merchant) {
     console.log("Run `npm run db:seed-recovery-demo` first.");
