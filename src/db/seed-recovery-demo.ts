@@ -44,10 +44,14 @@ const DEMO_DOMAIN = "@recovery.demo";
  * that working.
  */
 const CAST = [
-  { key: "TIMEOUT", name: "Aditi Rao", email: `aditi.rao${DEMO_DOMAIN}` },
-  { key: "REPEAT", name: "Neha Kulkarni", email: `neha.kulkarni${DEMO_DOMAIN}` },
-  { key: "BASKET", name: "Priya Menon", email: `priya.menon${DEMO_DOMAIN}` },
-  { key: "SILENT", name: "Rohan Iyer", email: `rohan.iyer${DEMO_DOMAIN}` },
+  { key: "TIMEOUT", name: "Aditi Rao", email: `aditi.rao${DEMO_DOMAIN}`,
+    line1: "12 Turner Road", city: "Mumbai", state: "Maharashtra", postcode: "400050" },
+  { key: "REPEAT", name: "Neha Kulkarni", email: `neha.kulkarni${DEMO_DOMAIN}`,
+    line1: "8 Prabhat Road", city: "Pune", state: "Maharashtra", postcode: "411004" },
+  { key: "BASKET", name: "Priya Menon", email: `priya.menon${DEMO_DOMAIN}`,
+    line1: "45 Indiranagar 100ft Road", city: "Bengaluru", state: "Karnataka", postcode: "560038" },
+  { key: "SILENT", name: "Rohan Iyer", email: `rohan.iyer${DEMO_DOMAIN}`,
+    line1: "3 Besant Avenue", city: "Chennai", state: "Tamil Nadu", postcode: "600020" },
 ];
 
 async function main() {
@@ -150,6 +154,18 @@ async function main() {
       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
       RETURNING id`)) as unknown as { id: string }[];
     people[person.key] = { id: row.id, name: person.name, email: person.email };
+
+    /*
+     * An address each, because the recovery loop only closes if the shopper can
+     * actually check out. The abandoned-basket scenario is the one path a
+     * person can walk to a captured payment by hand, and stalling it on an
+     * empty address form would be demonstrating the address feature instead.
+     */
+    await db.execute(sql`
+      INSERT INTO addresses (user_id, label, recipient, line1, city, state, postcode, is_default)
+      SELECT ${row.id}, 'Home', ${person.name}, ${person.line1}, ${person.city},
+             ${person.state}, ${person.postcode}, true
+      WHERE NOT EXISTS (SELECT 1 FROM addresses a WHERE a.user_id = ${row.id})`);
   }
 
   const totals = (minor: number) =>

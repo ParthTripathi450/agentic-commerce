@@ -27,6 +27,7 @@
     "db:backfill-qualities": "tsx --env-file=.env.local src/db/backfill-qualities.ts",
     "db:seed-reviews": "tsx --env-file=.env.local src/db/seed-reviews.ts",
     "recovery:demo": "tsx --env-file=.env.local src/scripts/recovery-demo.ts",
+    "recovery:fast-forward": "tsx --env-file=.env.local src/scripts/recovery-fast-forward.ts",
     "db:seed-recovery-demo": "tsx --env-file=.env.local src/db/seed-recovery-demo.ts",
     "db:backfill-addresses": "tsx --env-file=.env.local src/db/backfill-addresses.ts",
     "db:seed-personas": "tsx --env-file=.env.local src/db/seed-personas.ts",
