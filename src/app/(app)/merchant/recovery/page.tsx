@@ -35,6 +35,7 @@ export default async function RecoveryPage() {
       incentiveMinor: c.incentiveMinor,
       stopReason: c.stopReason,
       orderNumber: c.orderNumber,
+      shopperName: c.shopperName,
       shopperEmail: c.shopperEmail,
       summary: diagnosis?.summary ?? null,
       basis: diagnosis?.basis ?? [],

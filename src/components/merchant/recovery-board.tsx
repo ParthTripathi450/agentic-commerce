@@ -19,6 +19,7 @@ export type BoardCase = {
   incentiveMinor: number;
   stopReason: string | null;
   orderNumber: string | null;
+  shopperName: string;
   shopperEmail: string;
   summary: string | null;
   basis: string[];
@@ -159,7 +160,23 @@ export function RecoveryBoard({
                         </span>
                       ) : null}
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">{item.shopperEmail}</p>
+                    {/*
+                      * Who this is about, by name.
+                      *
+                      * A merchant deciding whether to approve contacting
+                      * someone — or reading why the agent stopped — is doing
+                      * that about a person, and an email address alone makes
+                      * them look up who it is before they can judge it.
+                      */}
+                    <p className="mt-1 text-xs">
+                      {item.shopperName ? (
+                        <span className="font-medium text-foreground">{item.shopperName}</span>
+                      ) : null}
+                      <span className="text-muted-foreground">
+                        {item.shopperName ? " · " : ""}
+                        {item.shopperEmail}
+                      </span>
+                    </p>
                   </div>
                   <div className="text-right">
                     <p className="tabular text-base font-semibold">

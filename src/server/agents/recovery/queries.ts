@@ -6,12 +6,13 @@ import { agentEvents, recoveryCases } from "@/db/schema";
 
 export type CaseRow = typeof recoveryCases.$inferSelect & {
   orderNumber: string | null;
+  shopperName: string;
   shopperEmail: string;
 };
 
 export async function listCases(merchantId: string, limit = 50): Promise<CaseRow[]> {
   const rows = (await db.execute(sql`
-    SELECT rc.*, o.order_number, u.email AS shopper_email
+    SELECT rc.*, o.order_number, u.name AS shopper_name, u.email AS shopper_email
     FROM recovery_cases rc
     LEFT JOIN orders o ON o.id = rc.order_id
     JOIN users u ON u.id = rc.user_id
@@ -28,6 +29,7 @@ export async function listCases(merchantId: string, limit = 50): Promise<CaseRow
     ...(r as unknown as typeof recoveryCases.$inferSelect),
     id: String(r.id),
     orderNumber: r.order_number ? String(r.order_number) : null,
+    shopperName: String(r.shopper_name ?? "").trim(),
     shopperEmail: String(r.shopper_email),
     amountAtRiskMinor: Number(r.amount_at_risk_minor),
     recoveredMinor: Number(r.recovered_minor ?? 0),
