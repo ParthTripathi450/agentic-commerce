@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "src/app/api/agent/**": { "maxDuration": 60 },
+    "src/app/api/mcp/route.ts": { "maxDuration": 60 },
+    "src/app/(app)/shop/page.tsx": { "maxDuration": 60 },
+    "src/app/(app)/browse/page.tsx": { "maxDuration": 30 },
+    "src/app/(app)/for-you/page.tsx": { "maxDuration": 30 },
+    "src/app/(app)/product/[id]/page.tsx": { "maxDuration": 30 }
+  }
+}
