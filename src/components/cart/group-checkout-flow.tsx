@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { WIDGET_UNAVAILABLE, loadRazorpayWidget } from "@/lib/razorpay-widget";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, ShieldCheck, User, X } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
@@ -101,7 +102,10 @@ export function GroupCheckoutFlow({
 
   useEffect(() => {
     void prepare();
-  }, [prepare]);
+    // Start fetching the widget now rather than on the click; `payManually`
+    // awaits the same shared promise either way.
+    if (!savedMethod) void loadRazorpayWidget();
+  }, [prepare, savedMethod]);
 
   /** Authorises every basket, then hands back the single gateway order. */
   async function authorize(proposal: Proposal) {
@@ -120,20 +124,26 @@ export function GroupCheckoutFlow({
   }
 
   async function payManually(proposal: Proposal) {
+    /*
+     * The widget is checked BEFORE anything is authorised.
+     *
+     * Doing it after was the real damage: authorisation creates real orders and
+     * a real gateway order, so a shopper whose widget never loaded was left
+     * holding a `pending_payment` order they had no way to pay, one per
+     * attempt. Nothing that cannot be completed should be started.
+     */
+    setPhase({ name: "working", note: "Opening the payment window…" });
+    const Razorpay = await loadRazorpayWidget();
+    if (!Razorpay) return setPhase({ name: "failed", reason: WIDGET_UNAVAILABLE });
+
     setPhase({ name: "working", note: "Authorising each merchant's basket…" });
     const authorized = await authorize(proposal);
     if (authorized.status !== "authorized") {
       return setPhase({ name: "failed", reason: authorized.reason ?? "Authorization failed." });
     }
-    if (!window.Razorpay) {
-      return setPhase({
-        name: "failed",
-        reason: "Payment widget unavailable. Nothing was charged.",
-      });
-    }
 
     // The genuine Razorpay window — the shopper enters the card themselves.
-    const checkout = new window.Razorpay({
+    const checkout = new Razorpay({
       key: authorized.gatewayKeyId,
       order_id: authorized.gatewayOrderId,
       amount: authorized.amountMinor,

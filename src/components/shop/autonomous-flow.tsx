@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { WIDGET_UNAVAILABLE, loadRazorpayWidget } from "@/lib/razorpay-widget";
 import { useRouter } from "next/navigation";
 import { Check, ShieldCheck, ShoppingCart, X } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
@@ -13,12 +14,6 @@ import type { TurnDto } from "@/server/agents/customer/dto";
 import { StarDisplay } from "@/components/reviews/star-rating";
 import { formatMoney } from "@/lib/money";
 import type { AutonomousOutcome } from "@/server/agents/customer/autonomous";
-
-declare global {
-  interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
-  }
-}
 
 type Awaiting = Extract<AutonomousOutcome, { status: "awaiting_authorization" }>;
 
@@ -40,8 +35,6 @@ const STEPS = [
   "Ranking and choosing",
   "Signing the mandate chain",
 ];
-
-const RAZORPAY_SRC = "https://checkout.razorpay.com/v1/checkout.js";
 
 type ChatTurn = { role: "shopper" | "agent"; content: string };
 
@@ -85,11 +78,7 @@ export function AutonomousFlow({
   // Loaded up front: by the time the shopper clicks Allow, the widget must be
   // ready — fetching it then would stall the one moment that matters.
   useEffect(() => {
-    if (window.Razorpay || document.querySelector(`script[src="${RAZORPAY_SRC}"]`)) return;
-    const script = document.createElement("script");
-    script.src = RAZORPAY_SRC;
-    script.async = true;
-    document.body.appendChild(script);
+    void loadRazorpayWidget();
   }, []);
 
   /**
@@ -435,14 +424,20 @@ export function AutonomousFlow({
     }
     setPhase({ name: "paying", orderNumber: result.orderNumber });
 
-    if (result.gateway === "mock" || !window.Razorpay) {
+    // Two different situations, and they were sharing one message: the mock
+    // gateway is a configuration choice, a widget that will not load is a
+    // problem the shopper can act on. Telling them apart is the whole point.
+    if (result.gateway === "mock") {
       return setPhase({
         name: "failed",
-        reason: "The payment widget is unavailable. Nothing was charged.",
+        reason: "Mock gateway is enabled; set PAYMENT_GATEWAY=razorpay to pay. Nothing was charged.",
       });
     }
 
-    const checkout = new window.Razorpay({
+    const Razorpay = await loadRazorpayWidget();
+    if (!Razorpay) return setPhase({ name: "failed", reason: WIDGET_UNAVAILABLE });
+
+    const checkout = new Razorpay({
       key: result.gatewayKeyId,
       order_id: result.gatewayOrderId,
       amount: result.amountMinor,

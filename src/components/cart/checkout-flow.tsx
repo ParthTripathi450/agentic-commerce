@@ -1,18 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { WIDGET_UNAVAILABLE, loadRazorpayWidget } from "@/lib/razorpay-widget";
 import { useRouter } from "next/navigation";
 import { Check, ShieldCheck, X } from "lucide-react";
 import { Alert, Button, Card, CardBody } from "@/components/ui";
 import { AddressPicker, type PickableAddress } from "./address-picker";
 import { formatMoney } from "@/lib/money";
 import type { CartView } from "@/server/commerce/cart";
-
-declare global {
-  interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
-  }
-}
 
 type Proposal = {
   status: "requires_authorization";
@@ -34,8 +29,6 @@ type Phase =
   | { name: "paid"; orderNumber: string }
   | { name: "declined"; reason: string }
   | { name: "failed"; reason: string; checks?: string[] };
-
-const RAZORPAY_SRC = "https://checkout.razorpay.com/v1/checkout.js";
 
 /**
  * Checkout for a cart the shopper assembled themselves.
@@ -62,12 +55,7 @@ export function CheckoutFlow({
   );
 
   useEffect(() => {
-    if (savedMethod) return; // widget not needed
-    if (window.Razorpay || document.querySelector(`script[src="${RAZORPAY_SRC}"]`)) return;
-    const script = document.createElement("script");
-    script.src = RAZORPAY_SRC;
-    script.async = true;
-    document.body.appendChild(script);
+    if (!savedMethod) void loadRazorpayWidget(); // warm it; the click awaits it
   }, [savedMethod]);
 
   const prepare = useCallback(async () => {
@@ -115,8 +103,22 @@ export function CheckoutFlow({
         })
       ).json();
       if (saved.status === "paid") return (router.refresh(), setPhase({ name: "paid", orderNumber: saved.orderNumber }));
-      if (saved.status === "failed") return setPhase({ name: "failed", reason: saved.reason });
+      /*
+       * Any other answer ends here too. Falling through led to the widget path,
+       * which is deliberately NOT loaded when a saved method exists — so an
+       * unexpected status authorised an order and then reported the widget
+       * missing, which was true and entirely beside the point.
+       */
+      return setPhase({
+        name: "failed",
+        reason: saved.reason ?? "That saved payment method could not be used. Nothing was charged.",
+      });
     }
+
+    // Checked before authorising: authorisation creates a real order and a real
+    // gateway order, and one that cannot be paid is worse than one not started.
+    const Razorpay = await loadRazorpayWidget();
+    if (!Razorpay) return setPhase({ name: "failed", reason: WIDGET_UNAVAILABLE });
 
     const authorized = await (
       await fetch("/api/commerce/authorize", {
@@ -133,11 +135,7 @@ export function CheckoutFlow({
     if (authorized.status !== "authorized") {
       return setPhase({ name: "failed", reason: authorized.reason, checks: authorized.checks });
     }
-    if (!window.Razorpay) {
-      return setPhase({ name: "failed", reason: "Payment widget unavailable. Nothing was charged." });
-    }
-
-    const checkout = new window.Razorpay({
+    const checkout = new Razorpay({
       key: authorized.gatewayKeyId,
       order_id: authorized.gatewayOrderId,
       amount: authorized.amountMinor,

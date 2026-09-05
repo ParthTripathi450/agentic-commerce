@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { WIDGET_UNAVAILABLE, loadRazorpayWidget } from "@/lib/razorpay-widget";
 import { Alert, Badge, Button, Card, CardBody } from "@/components/ui";
 import { formatMoney } from "@/lib/money";
 import type { CartView } from "@/server/commerce/cart";
@@ -12,12 +13,6 @@ import type { CartView } from "@/server/commerce/cart";
  * amount, the exact items, and the limits that were applied, because this is
  * the one moment where a human takes responsibility for what the agent found.
  */
-
-declare global {
-  interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
-  }
-}
 
 type Proposal = {
   status: "requires_authorization";
@@ -44,23 +39,6 @@ type Phase =
   | { name: "declined"; reason: string }
   | { name: "failed"; reason: string; checks?: string[] };
 
-const RAZORPAY_SRC = "https://checkout.razorpay.com/v1/checkout.js";
-
-function useRazorpayScript(enabled: boolean) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    if (!enabled) return;
-    if (window.Razorpay) return setReady(true);
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${RAZORPAY_SRC}"]`);
-    const script = existing ?? document.createElement("script");
-    script.src = RAZORPAY_SRC;
-    script.async = true;
-    script.onload = () => setReady(true);
-    if (!existing) document.body.appendChild(script);
-  }, [enabled]);
-  return ready;
-}
-
 export function PurchaseFlow({
   variantId,
   productTitle,
@@ -77,7 +55,13 @@ export function PurchaseFlow({
   onClose: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
-  const razorpayReady = useRazorpayScript(phase.name === "awaiting_authorization");
+  const [razorpayReady, setRazorpayReady] = useState(false);
+  // Warmed while the shopper reads the proposal, so clicking Allow does not
+  // wait on a network fetch; `decide` awaits the same shared promise anyway.
+  useEffect(() => {
+    if (phase.name !== "awaiting_authorization") return;
+    void loadRazorpayWidget().then((w) => setRazorpayReady(Boolean(w)));
+  }, [phase.name]);
 
   const start = useCallback(async () => {
     setPhase({ name: "preparing" });
@@ -136,11 +120,10 @@ export function PurchaseFlow({
       return setPhase({ name: "failed", reason: "Mock gateway is enabled; set PAYMENT_GATEWAY=razorpay to pay." });
     }
 
-    if (!window.Razorpay) {
-      return setPhase({ name: "failed", reason: "The payment widget could not load. Nothing was charged." });
-    }
+    const Razorpay = await loadRazorpayWidget();
+    if (!Razorpay) return setPhase({ name: "failed", reason: WIDGET_UNAVAILABLE });
 
-    const checkout = new window.Razorpay({
+    const checkout = new Razorpay({
       key: result.gatewayKeyId,
       order_id: result.gatewayOrderId,
       amount: result.amountMinor,
