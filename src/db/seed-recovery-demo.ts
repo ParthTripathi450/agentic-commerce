@@ -71,9 +71,19 @@ async function main() {
      * Orders BEFORE shoppers. `orders.user_id` does not cascade — deliberately,
      * since a paid order is a financial record that should not vanish with an
      * account — so a shopper who has one cannot be deleted until it is gone.
+     *
+     * And EVERY order those shoppers hold, not merely the tagged ones. They
+     * exist for this demo and nothing else, so anything they acquired along the
+     * way — a retry, a checkout walked by hand — was made by the demo too.
+     * Deleting only the tagged orders left the reset failing on its own
+     * foreign key half way through, with the orders gone and the shoppers
+     * still there: worse than not resetting at all.
      */
     const orders = (await db.execute(sql`
-      DELETE FROM orders WHERE order_number LIKE ${`${TAG}%`} RETURNING id`)) as unknown as unknown[];
+      DELETE FROM orders
+      WHERE order_number LIKE ${`${TAG}%`}
+         OR user_id IN (SELECT id FROM users WHERE email LIKE ${`%${DEMO_DOMAIN}`})
+      RETURNING id`)) as unknown as unknown[];
     const people = (await db.execute(sql`
       DELETE FROM users WHERE email LIKE ${`%${DEMO_DOMAIN}`} RETURNING id`)) as unknown as unknown[];
     const threads = (await db.execute(sql`

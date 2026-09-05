@@ -4,19 +4,22 @@ import { db } from "@/db";
 import { catalogDocuments, merchants, products } from "@/db/schema";
 import { CatalogHealth } from "@/components/merchant/catalog-health";
 import { getCartItemCount } from "@/server/commerce/cart";
+import { pendingThreadsForCustomer, pendingThreadsForMerchant } from "@/server/support/queries";
 import { AppSidebar, SignOutButton, type NavItem } from "@/components/app-sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { auth } from "@/lib/auth";
 import { signOutAction } from "@/server/auth/actions";
 
-const customerNav = (cartCount: number): NavItem[] => [
+const customerNav = (cartCount: number, waiting: number): NavItem[] => [
   { href: "/shop", label: "Shop with AI", icon: "shop" },
   { href: "/browse", label: "Browse products", icon: "store" },
   { href: "/for-you", label: "For you", icon: "insights" },
   { href: "/cart", label: "Your cart", icon: "cart", badge: cartCount || undefined },
   { href: "/orders", label: "Your orders", icon: "orders" },
   { href: "/reviews", label: "Your reviews", icon: "reviews" },
-  { href: "/support", label: "Support", icon: "support" },
+  // Badged when the merchant has come back to them. A reply nobody notices is
+  // a reply that did not happen, and the recovery agent's outreach lands here.
+  { href: "/support", label: "Support", icon: "support", badge: waiting || undefined },
 ];
 
 const CUSTOMER_SECONDARY: NavItem[] = [
@@ -35,8 +38,8 @@ const MERCHANT_PRIMARY: NavItem[] = [
   { href: "/merchant/reviews", label: "Reviews", icon: "reviews" },
 ];
 
-const MERCHANT_SECONDARY: NavItem[] = [
-  { href: "/merchant/support", label: "Customer queries", icon: "support" },
+const merchantSecondary = (waiting: number): NavItem[] => [
+  { href: "/merchant/support", label: "Customer queries", icon: "support", badge: waiting || undefined },
   { href: "/merchant/protocols", label: "Protocols", icon: "protocols" },
   { href: "/merchant/settings", label: "Settings", icon: "settings" },
 ];
@@ -46,7 +49,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session?.user?.id) redirect("/login");
 
   const isMerchant = session.user.role === "merchant";
-  const cartCount = isMerchant ? 0 : await getCartItemCount(session.user.id);
+  const [cartCount, waiting] = await Promise.all([
+    isMerchant ? Promise.resolve(0) : getCartItemCount(session.user.id),
+    isMerchant
+      ? pendingThreadsForMerchant(session.user.id)
+      : pendingThreadsForCustomer(session.user.id),
+  ]);
 
   // How much of this merchant's catalogue AI buyers can actually find.
   let health: { indexed: number; total: number } | null = null;
@@ -66,8 +74,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <AppSidebar
-        primary={isMerchant ? MERCHANT_PRIMARY : customerNav(cartCount)}
-        secondary={isMerchant ? MERCHANT_SECONDARY : CUSTOMER_SECONDARY}
+        primary={isMerchant ? MERCHANT_PRIMARY : customerNav(cartCount, waiting)}
+        secondary={isMerchant ? merchantSecondary(waiting) : CUSTOMER_SECONDARY}
         user={{
           name: session.user.name ?? "Account",
           email: session.user.email ?? "",

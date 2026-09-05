@@ -202,13 +202,38 @@ export function ThreadConversation({
   );
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { tone: "info" | "warning" | "success" | "neutral"; label: string }> = {
-    open: { tone: "warning", label: "Awaiting merchant" },
-    awaiting_customer: { tone: "info", label: "Awaiting you" },
-    answered: { tone: "info", label: "Merchant replied" },
-    resolved: { tone: "success", label: "Resolved" },
-  };
+/**
+ * Whose turn it is, worded for whoever is reading.
+ *
+ * The same `open` thread is "awaiting merchant" to a shopper and "needs your
+ * reply" to the merchant, and only the second of those tells the person looking
+ * at it that they have something to do. A status label written from one side
+ * only is half a label.
+ */
+export function StatusBadge({
+  status,
+  viewer = "customer",
+}: {
+  status: string;
+  viewer?: "customer" | "merchant";
+}) {
+  const map: Record<
+    string,
+    { tone: "info" | "warning" | "success" | "neutral"; label: string }
+  > =
+    viewer === "merchant"
+      ? {
+          open: { tone: "warning", label: "Needs your reply" },
+          awaiting_customer: { tone: "info", label: "Awaiting the shopper" },
+          answered: { tone: "info", label: "You replied" },
+          resolved: { tone: "success", label: "Resolved" },
+        }
+      : {
+          open: { tone: "warning", label: "Awaiting merchant" },
+          awaiting_customer: { tone: "info", label: "Awaiting you" },
+          answered: { tone: "info", label: "Merchant replied" },
+          resolved: { tone: "success", label: "Resolved" },
+        };
   const entry = map[status] ?? { tone: "neutral" as const, label: status };
   return <Badge tone={entry.tone}>{entry.label}</Badge>;
 }

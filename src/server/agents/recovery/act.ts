@@ -95,6 +95,19 @@ export async function sendRecoveryMessage(input: {
     body: input.body,
   });
 
+  /*
+   * The ball is with the SHOPPER, and the status has to say so.
+   *
+   * A thread defaults to `open`, which means "waiting on the merchant" — so
+   * outreach the merchant's own agent sent would have badged the merchant's
+   * inbox and left the shopper with no indication anything had arrived. Whose
+   * turn it is follows from who spoke last, exactly as a human reply does.
+   */
+  await db
+    .update(supportThreads)
+    .set({ status: "answered", lastMessageAt: new Date(), updatedAt: new Date() })
+    .where(eq(supportThreads.id, threadId));
+
   return {
     ok: true,
     detail: `Message sent to the shopper in their support thread.`,
@@ -224,6 +237,8 @@ export async function escalateToMerchant(input: {
       merchantId: input.merchantId,
       orderId: input.orderId ?? null,
       subject: `Recovery needs a human — ${formatMoney(input.amountAtRiskMinor)} at risk`,
+      // `open` is correct here and is the default: an escalation is precisely a
+      // thing waiting on the merchant, and it should badge their inbox.
     })
     .returning();
 

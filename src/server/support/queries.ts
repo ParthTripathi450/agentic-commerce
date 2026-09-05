@@ -129,3 +129,37 @@ export async function getCustomerOrderOptions() {
     .orderBy(desc(orders.createdAt))
     .limit(30);
 }
+
+/**
+ * Conversations waiting on the person reading the page.
+ *
+ * "Pending" is not one thing — it depends entirely on who is asking, and the
+ * thread status already encodes whose turn it is because `replyToThreadAction`
+ * hands the ball over on every reply. A merchant is owed the threads where the
+ * customer spoke last (`open`); a customer is owed the ones where the merchant
+ * did (`answered`) and any explicitly put back to them (`awaiting_customer`).
+ * `resolved` is nobody's.
+ *
+ * Counted in SQL rather than by loading threads and filtering: the sidebar
+ * renders on every page in the app, and this must cost one cheap count.
+ */
+export async function pendingThreadsForCustomer(userId: string): Promise<number> {
+  // The states are written out rather than interpolated from an array: drizzle
+  // expands a JS array into a parameter LIST, so `= ANY(${[...]})` reaches
+  // Postgres as `ANY(($1, $2))` and raises "requires array on right side".
+  const [row] = (await db.execute(sql`
+    SELECT count(*) AS n FROM support_threads
+    WHERE customer_id = ${userId} AND status IN ('answered', 'awaiting_customer')
+  `)) as unknown as { n: string }[];
+  return Number(row?.n ?? 0);
+}
+
+/** Takes the merchant OWNER's user id, which is what a session carries. */
+export async function pendingThreadsForMerchant(ownerUserId: string): Promise<number> {
+  const [row] = (await db.execute(sql`
+    SELECT count(*) AS n FROM support_threads t
+    JOIN merchants m ON m.id = t.merchant_id
+    WHERE m.user_id = ${ownerUserId} AND t.status = 'open'
+  `)) as unknown as { n: string }[];
+  return Number(row?.n ?? 0);
+}

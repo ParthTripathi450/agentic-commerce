@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { defaultAddress, getAddress, toSnapshot } from "./addresses";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   approvals,
@@ -635,10 +635,19 @@ export async function confirmPayment(input: {
     return { status: "paid", orderId: order.id, orderNumber: order.orderNumber };
   }
 
+  /*
+   * The NEWEST attempt, not merely the first row found.
+   *
+   * An order can now hold several payment rows: a retry writes a new one beside
+   * the failure it is rescuing (`retry-payment.ts`). Taking an arbitrary row
+   * would verify the shopper's signature against a stale gateway order and
+   * report a genuine payment as unverifiable.
+   */
   const [payment] = await db
     .select()
     .from(payments)
     .where(eq(payments.orderId, order.id))
+    .orderBy(desc(payments.createdAt))
     .limit(1);
   if (!payment?.gatewayOrderId) return { status: "failed", reason: "No payment was started for this order." };
 
@@ -730,7 +739,7 @@ export async function confirmPayment(input: {
   return { status: "paid", orderId: order.id, orderNumber: order.orderNumber };
 }
 
-async function sessionCartId(checkoutSessionId: string): Promise<string> {
+export async function sessionCartId(checkoutSessionId: string): Promise<string> {
   const [session] = await db
     .select({ cartId: checkoutSessions.cartId })
     .from(checkoutSessions)

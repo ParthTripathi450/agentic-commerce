@@ -44,7 +44,7 @@ export default async function MerchantSupportPage({
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-medium">{t.subject}</span>
-                        <StatusBadge status={t.status} />
+                        <StatusBadge status={t.status} viewer="merchant" />
                       </div>
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">
                         {t.topic}
@@ -69,7 +69,7 @@ export default async function MerchantSupportPage({
               <>
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                   <p className="text-sm font-semibold">{open.thread.subject}</p>
-                  <StatusBadge status={open.thread.status} />
+                  <StatusBadge status={open.thread.status} viewer="merchant" />
                 </div>
                 <ThreadConversation
                   threadId={open.thread.id}

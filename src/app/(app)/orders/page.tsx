@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { merchantPolicies, merchants, orderItems, orders, payments, productReviews, productVariants } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
 import { RefundRequest } from "@/components/cart/refund-request";
+import { RetryPayment } from "@/components/cart/retry-payment";
 import { formatAddress } from "@/server/commerce/addresses";
 import { requireCustomer } from "@/lib/session";
 import { getMerchantRatings, getMerchantReviewsByOrder } from "@/server/reviews/queries";
@@ -215,6 +216,18 @@ export default async function OrdersPage() {
                     <p className="text-xs text-danger">
                       Payment did not go through: {failureReason}. You were not charged.
                     </p>
+                  ) : null}
+                  {/*
+                    * A failed payment is a sale that is still available, not a
+                    * closed record — and until this existed, the page said what
+                    * went wrong and offered no way to fix it.
+                    */}
+                  {order.state === "payment_failed" || order.state === "pending_payment" ? (
+                    <RetryPayment
+                      orderId={order.id}
+                      orderNumber={order.orderNumber}
+                      amountLabel={formatMoney(order.totals.totalMinor)}
+                    />
                   ) : null}
                   {paymentState === "captured" ? (
                     <p className="text-xs text-subtle">Paid via Razorpay test mode.</p>
