@@ -974,7 +974,22 @@ in without touching any stage.
     the turn fell through to a catch-all, with `degraded: false` and no error anywhere. Rules are a
     SAFETY NET over the model, not merely a substitute when it is offline: back-fill the fields the
     model left null, and let a value it actually stated win. Same shape as §8.8.
-36. **A question about the CONTAINER is not a question about the CONTENT.** "What are some of the
+36. **A payment widget must be resolved BEFORE anything is authorised, and its
+    absence is not readable from `window`.** `/checkout` renders
+    `GroupCheckoutFlow`, which never loaded `checkout.js` at all — the script tag
+    lived only in the older `CheckoutFlow` and was not carried across when group
+    checkout was built (§8.13 again). But the ordering was the real damage: all
+    four flows authorised first and checked `window.Razorpay` after, so a shopper
+    whose widget did not load held a real `pending_payment` order against a real
+    Razorpay order with no way to pay it, one per attempt. Sampling the global at
+    click time also cannot distinguish "still loading" from "blocked by an
+    extension" — a slow connection and an ad blocker produced the same dead end.
+    `src/lib/razorpay-widget.ts` is now the only loader: it resolves to the
+    CONSTRUCTOR (a boolean would leave callers re-reading a global that does not
+    narrow across an await), does not cache a failure, and every flow awaits it
+    before authorising. **Nothing that cannot be completed should be started.**
+
+37. **A question about the CONTAINER is not a question about the CONTENT.** "What are some of the
     reviews?" cannot be served by retrieval over reviews — they discuss the product, not themselves —
     and it scores 0.311 where "is it comfortable" scores 0.553, so the relevance floor rejects it
     correctly and the reviews stay unreachable. Recognise the shape and return a SAMPLE. Watch for
