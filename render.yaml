@@ -1,0 +1,79 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# This app runs as ONE Node process rather than as functions, which is what
+# makes it deployable on a free tier at all: it has 50 routes, and a
+# function-per-route platform caps a free plan far below that. Running a process
+# also keeps the embedding model resident between requests — it costs ~220MB
+# once, instead of being reloaded on every cold function invocation.
+services:
+  - type: web
+    name: agentic-commerce
+    runtime: node
+    plan: free
+    region: singapore # nearest Render region to the Supabase project in ap-northeast-1
+    branch: main
+
+    # `npm ci` for a reproducible install; the build's own `prebuild` step then
+    # downloads the sentence model so the running server never has to.
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+
+    # Render sets PORT and expects the process to bind it; `next start` reads it.
+    healthCheckPath: /login
+
+    envVars:
+      - key: NODE_VERSION
+        value: "20.20.0"
+      # Raised because `next build` plus the model download is heavier than the
+      # default heap, and an OOM during build reads as an unexplained failure.
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=1024"
+
+      # --- set these in the Render dashboard, not here ---
+      # sync:false means "prompt me for a value" rather than "commit a secret".
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Set to the service's own https URL once Render has assigned one.
+      # Signed mandates and the protocol manifests embed it, so a stale value
+      # produces links pointing at the wrong host.
+      - key: PLATFORM_URL
+        sync: false
+
+      # --- safe to commit: no secrets, and the values are load-bearing ---
+      - key: LLM_PRIMARY
+        value: groq
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_FAST_MODEL
+        value: openai/gpt-oss-20b
+      - key: EMBEDDING_PROVIDER
+        value: local
+      # Changing either of these invalidates every vector already stored.
+      - key: EMBEDDING_MODEL
+        value: Xenova/all-MiniLM-L6-v2
+      - key: PAYMENT_GATEWAY
+        value: razorpay
+      # The local driver writes to the filesystem, which does not survive a
+      # restart here and is not shared between instances.
+      - key: STORAGE_DRIVER
+        value: supabase
+      - key: SUPABASE_STORAGE_BUCKET
+        value: product-images
